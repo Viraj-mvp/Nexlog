@@ -231,6 +231,7 @@ def check_package_exclusions() -> list[str]:
 def check_smoke() -> list[str]:
     commands = [
         [sys.executable, "-B", "main.py", "--help"],
+        [sys.executable, "-B", "main.py", "examples/logs/Apache_2k.log", "--summary", "--quiet"],
         [sys.executable, "-B", "main_gui.py", "--help"],
         [sys.executable, "-B", "main_gui.py", "--packaged-check"],
         [sys.executable, "-B", "-m", "interface.web.serve", "--help"],

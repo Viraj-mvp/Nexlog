@@ -208,7 +208,7 @@ def build_binary(exe_only: bool = False) -> int:
     # If build succeeded, package it into a neat release ZIP with accessories
     sys_name = platform.system().lower()
     machine = platform.machine().lower()
-    if machine == "amd64":
+    if machine in {"amd64", "x86_64"}:
         machine = "x64"
     elif machine == "aarch64":
         machine = "arm64"
@@ -221,7 +221,7 @@ def build_binary(exe_only: bool = False) -> int:
         dist_dir = RELEASE_DIR / "NexLog"
         if dist_dir.exists() and dist_dir.is_dir():
             print(f"Portable folder built at {dist_dir}. Packaging folder...")
-            zip_name = f"NexLog-v{VERSION}-{sys_name}-{machine}-portable.zip"
+            zip_name = f"NexLog-v{VERSION}-{sys_name}-{machine}.zip"
             zip_path = RELEASE_DIR / zip_name
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 # Add portable folder contents

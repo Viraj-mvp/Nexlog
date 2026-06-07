@@ -1,0 +1,188 @@
+﻿# detection/rules/recon.yaml  â€” NexLog v2
+# 5 rules â€” active scanning, enumeration, fingerprinting
+
+rules:
+
+  - id: RECON-001
+    name: Port Scan Detected
+    description: >
+      Single source IP touching 15+ distinct destination ports within 30 seconds.
+      Network reconnaissance before exploitation.
+    severity: MEDIUM
+    category: recon
+    confidence: 0.85
+    type: threshold
+    group_by: source_ip
+    count: 15
+    window_secs: 30
+    count_distinct: dest_port
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+        sub_technique: ".001"
+    indicators: [source_ip]
+    tags: [portscan, recon]
+
+  - id: RECON-002
+    name: Web Directory Enumeration
+    description: >
+      20+ HTTP 404 responses to varied paths from same IP within 30 seconds.
+      Consistent with gobuster/feroxbuster/ffuf directory fuzzing.
+    severity: MEDIUM
+    category: recon
+    confidence: 0.80
+    type: threshold
+    group_by: source_ip
+    count: 20
+    window_secs: 30
+    filter:
+      http_status_in: [404]
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+        sub_technique: ".003"
+    indicators: [source_ip, http_user_agent]
+    tags: [dir_enum, recon]
+
+  - id: RECON-003
+    name: API Endpoint Discovery
+    description: >
+      Rapid requests to /api/, /v1/, /swagger, /graphql, /actuator paths.
+      API surface discovery preceding targeted attacks.
+    severity: LOW
+    category: recon
+    confidence: 0.72
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)^/(api|v[0-9]+|rest|graphql|swagger|openapi|actuator|
+      metrics|health|debug|admin|management|console)(/|$)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_uri]
+    tags: [api_discovery, recon]
+
+  - id: RECON-004
+    name: Cloud / S3 Bucket Enumeration
+    description: >
+      Requests to common S3 bucket name patterns or AWS endpoints
+      suggesting cloud infrastructure enumeration.
+    severity: MEDIUM
+    category: recon
+    confidence: 0.75
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\.s3\.amazonaws\.com|s3-website|
+      \.blob\.core\.windows\.net|
+      \.storage\.googleapis\.com|
+      /\.env|/config\.json|/secrets\.json|
+      /\.git/config|/\.svn/entries|/WEB-INF/web\.xml)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1596
+        technique_name: Search Open Technical Databases
+    indicators: [source_ip, http_uri]
+    tags: [cloud_enum, bucket_recon]
+
+  - id: RECON-005
+    name: Host Fingerprinting via HTTP Methods
+    description: >
+      Uncommon HTTP methods (OPTIONS, TRACE, PROPFIND, CONNECT) being
+      probed â€” used to fingerprint server type and enabled features.
+    severity: LOW
+    category: recon
+    confidence: 0.68
+    type: regex
+    match_field: http_method
+    pattern: >-
+      ^(OPTIONS|TRACE|TRACK|PROPFIND|PROPPATCH|MKCOL|
+      COPY|MOVE|LOCK|UNLOCK|CONNECT|DEBUG)$
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_method, http_uri]
+    tags: [fingerprinting, http_methods]
+
+  - id: RECON-006
+    name: Shodan / Mass Internet Scanner
+    description: >
+      Requests from known Shodan, Censys, or ZoomEye scanner IP ranges,
+      or scanner-characteristic single-packet service probes. These are
+      passive recon tools mapping the internet looking for attack surface.
+    severity: LOW
+    category: recon
+    confidence: 0.80
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)(Shodan|Censys|ZoomEye|Masscan|zgrab|
+      InternetMeasurement|ivre\b|
+      shadow-server|ShadowServer|
+      Expanse\s+indexes|binaryedge|
+      netcraft\s+survey|netsys\.com)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1596
+        technique_name: Search Open Technical Databases
+    indicators: [source_ip, http_user_agent, http_uri]
+    tags: [shodan, censys, internet_scanner, passive_recon]
+
+  - id: RECON-007
+    name: Subdomain / DNS Enumeration
+    description: >
+      High rate of DNS queries for subdomains of a single domain.
+      Consistent with dnsx, subfinder, amass, or gobuster DNS mode.
+    severity: MEDIUM
+    category: recon
+    confidence: 0.78
+    type: threshold
+    group_by: source_ip
+    count: 50
+    window_secs: 60
+    count_distinct: dest_ip
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1596
+        technique_name: Search Open Technical Databases
+        sub_technique: ".001"
+    indicators: [source_ip]
+    tags: [subdomain_enum, dns_brute, recon, amass, subfinder]
+
+  - id: RECON-008
+    name: SSL Certificate / CT Log Enumeration
+    description: >
+      Requests to certificate transparency APIs (crt.sh, censys cert search)
+      used to enumerate subdomains and infrastructure without active scanning.
+      Passive recon that leaves almost no footprint on the target.
+    severity: LOW
+    category: recon
+    confidence: 0.68
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(crt\.sh\/\?q=|crt\.sh\/\?identity=|
+      censys\.io\/certificates|
+      certspotter\.com\/api|
+      transparencyreport\.google\.com\/https\/ct|
+      sslmate\.com\/certspotter)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1596
+        technique_name: Search Open Technical Databases
+        sub_technique: ".003"
+    indicators: [source_ip, http_uri_decoded]
+    tags: [ct_logs, ssl_recon, passive_recon, subdomain_enum]

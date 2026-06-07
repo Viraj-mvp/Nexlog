@@ -1,0 +1,199 @@
+﻿# detection/rules/network_protocols.yaml â€” NexLog v2
+# 7 rules â€” network protocol abuse: ARP, ICMP, DNS, SMB, TLS, VLAN
+# Log sources: firewall logs, IDS/IPS (Snort/Suricata), DNS server logs,
+#              network syslog, Zeek/Bro logs, packet capture analysis
+#
+# These attacks operate BELOW the application layer â€” they manipulate
+# the network itself rather than the application on top of it.
+
+rules:
+
+  - id: NET-001
+    name: DNS Rebinding Attack
+    description: >
+      DNS response with very low TTL (< 10 seconds) pointing to an
+      internal RFC1918 IP. Classic DNS rebinding setup â€” attacker's
+      domain resolves to external IP first, then switches to internal IP
+      to bypass Same-Origin Policy and access internal services.
+    severity: HIGH
+    category: network_attack
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(TTL\s*:\s*[0-9]\b|TTL=[0-9]\b|
+      dns.*ttl.*\b[0-9]\b.*
+      (10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.)|
+      ANSWER.*\b[0-9]\b.*TTL.*
+      (10\.|192\.168\.|172\.)|
+      dns\s+rebind|rebinding\s+detected)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1557
+        technique_name: Adversary-in-the-Middle
+    indicators: [source_ip, message]
+    tags: [dns_rebinding, same_origin_bypass, network_attack]
+
+  - id: NET-002
+    name: ICMP Tunneling / Covert Channel
+    description: >
+      Oversized ICMP packets (> 84 bytes payload), high-rate ICMP,
+      or ICMP with non-standard type/code combinations. Classic C2
+      channel and data exfiltration technique evading port-based controls.
+    severity: HIGH
+    category: network_attack
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(ICMP.*length\s*[2-9][0-9]{2,}|
+      icmp.*payload.*[89][0-9][0-9]|
+      ICMP.*type\s*8.*data\s*length\s*[1-9][0-9]{2,}|
+      ping.*size\s*[1-9][0-9]{3,}|
+      icmpsh|icmp\s*tunnel|
+      ptunnel|icmptunnel)
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1095
+        technique_name: Non-Application Layer Protocol
+    indicators: [source_ip, dest_ip, message]
+    tags: [icmp_tunnel, covert_channel, c2, network_attack]
+
+  - id: NET-003
+    name: SMBv1 EternalBlue / MS17-010 Exploit Pattern
+    description: >
+      SMBv1 negotiation or exploit signatures on port 445. EternalBlue
+      is still actively exploited for ransomware distribution and worm
+      propagation. Any SMBv1 traffic in 2026 is suspicious.
+    severity: CRITICAL
+    category: network_attack
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(NT\s+LM\s+0\.12|SMB1|SMBv1|
+      dialect.*NT\s+LM\s+0\.12|
+      MS17-010|EternalBlue|DOUBLEPULSAR|
+      Trans2\s+SESSION_SETUP|
+      SMB.*\\\*SMBSERVER|
+      port\s+445.*EXPLOIT|
+      smb.*overflow)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1210
+        technique_name: Exploitation of Remote Services
+    indicators: [source_ip, dest_ip, message]
+    tags: [smb, eternalblue, ms17_010, ransomware, network_attack, critical]
+
+  - id: NET-004
+    name: SSL / TLS Certificate Anomaly
+    description: >
+      Self-signed cert, expired cert, or cert with suspicious attributes
+      (very short validity, no SAN, known C2 CN patterns) in TLS handshake.
+      Malware C2 infrastructure commonly uses self-signed or free certs.
+    severity: MEDIUM
+    category: network_attack
+    confidence: 0.70
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(self.signed\s+certificate|
+      certificate.*verify\s+failed|
+      SSL_ERROR_BAD_CERT_DOMAIN|
+      certificate.*expired|
+      certificate.*issued\s+by.*Unknown|
+      CN=.*\.(bit|onion|tk|ml|ga|cf)\b|
+      SubjectCN.*[a-z0-9]{20,}\.(com|net|org)|
+      issuer.*Let.s\s+Encrypt.*validity.*[1-9]\s+day)
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1573
+        technique_name: Encrypted Channel
+    indicators: [source_ip, dest_ip, message]
+    tags: [tls, self_signed_cert, c2_infra, network_attack]
+
+  - id: NET-005
+    name: ARP Spoofing / Cache Poisoning
+    description: >
+      Duplicate ARP replies for the same IP from different MAC addresses,
+      or gratuitous ARP from unexpected host. Enables MITM position on LAN.
+      Visible in switch/IDS syslog or Zeek arp.log.
+    severity: HIGH
+    category: network_attack
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(ARP.*duplicate|duplicate\s+IP|
+      possible\s+ARP\s+(spoofing|poisoning|flood)|
+      received\s+arp\s+from.*different\s+MAC|
+      gratuitous\s+ARP.*conflict|
+      IP.*already\s+in\s+use|
+      arp\s+cache\s+poisoning|
+      arpspoof|bettercap.*arp)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1557
+        technique_name: Adversary-in-the-Middle
+        sub_technique: ".002"
+    indicators: [source_ip, dest_ip, message]
+    tags: [arp_spoofing, mitm, lan_attack, network_attack]
+
+  - id: NET-006
+    name: VLAN Hopping Attempt
+    description: >
+      Double-encapsulated 802.1Q VLAN tags or DTP negotiation frames
+      indicating VLAN hopping attack. Allows traffic to cross VLAN
+      boundaries and reach otherwise isolated network segments.
+    severity: HIGH
+    category: network_attack
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(vlan\s+hop|double.tag|802\.1[Qq].*802\.1[Qq]|
+      DTP\s+negotiation|dynamic\s+trunking|
+      native\s+vlan.*mismatch|
+      switch.*trunk.*negotiating|
+      yersinia.*vlan|
+      scapy.*dot1q.*dot1q)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1599
+        technique_name: Network Boundary Bridging
+        sub_technique: ".001"
+    indicators: [source_ip, message]
+    tags: [vlan_hopping, network_segmentation_bypass, network_attack]
+
+  - id: NET-007
+    name: Tor / Anonymous Network Exit Node
+    description: >
+      Traffic originating from known Tor exit node IP ranges or
+      I2P/proxy services. Attackers route through anonymizing networks
+      to hide their true origin.
+    severity: MEDIUM
+    category: network_attack
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(tor\s+exit\s+node|\.onion\b|
+      torproject\.org|torbrowser|
+      Tor.*circuit|exit\s+policy|
+      i2p.*router|i2p.*tunnel|freenet\.org|
+      known\s+(proxy|vpn|anonymizer)\s+IP|
+      anonmgr|tor2web)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1090
+        technique_name: Proxy
+        sub_technique: ".003"
+    indicators: [source_ip, message]
+    tags: [tor, anonymizer, proxy_chain, attribution_evasion]

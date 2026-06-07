@@ -1,0 +1,43 @@
+# NexLog Python dependencies
+# Install everything:
+#   python -m pip install -r requirements.txt
+#
+# NexLog is source-portable across Windows, Linux, and macOS. Packaged
+# binaries are built separately per OS with PyInstaller.
+
+# Core analysis, parsers, and detection rules
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+defusedxml>=0.7.1
+ijson>=3.2.0
+python-evtx>=0.7.4
+
+# Reporting and graph export
+reportlab>=4.0.0
+networkx>=3.0
+pillow>=10.0.0
+
+# Desktop GUI
+PySide6>=6.6.0
+
+# REST API
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.7
+
+# Optional intelligence enrichment
+maxminddb>=2.4.0
+
+# Full AI profile
+# These are intentionally included for the full publish build requested by the
+# project. The GUI keeps AI lazy so startup does not load these models.
+numpy>=1.26.0
+scikit-learn>=1.4.0
+sentence-transformers>=2.6.0
+chromadb>=0.4.22
+
+# Tests
+pytest>=8.0.0
+
+# Packaging
+pyinstaller>=6.0.0

@@ -1,0 +1,33 @@
+﻿version: "3.9"
+
+services:
+  nexlog:
+    build:
+      context: ..
+      dockerfile: packaging/Dockerfile
+    container_name: nexlog
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data/cases:/data/cases
+      - ../data/uploads:/data/uploads
+      - ../data/reports:/data/reports
+      - ../nexlog/detection/rules:/app/nexlog/detection/rules:ro
+    environment:
+      - NEXLOG_API_KEY=${NEXLOG_API_KEY:-}
+      - NEXLOG_WORKSPACE_DIR=/data/cases
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nexlog-ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    profiles:
+      - with-ollama
+
+volumes:
+  ollama_models:

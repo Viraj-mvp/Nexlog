@@ -1,0 +1,17 @@
+tests:
+  - name: apache-smoke
+    log_path: ../logs/Apache_2k.log
+    min_findings: 0
+    limit_entries: 2000
+    max_ms: 30000
+    expected_formats:
+      - apache_access
+    notes: "Baseline web-server sample. Add expected_rules after tuning web detections."
+  - name: openssh-smoke
+    log_path: ../logs/OpenSSH_2k.log
+    min_findings: 0
+    limit_entries: 2000
+    max_ms: 30000
+    expected_formats:
+      - auth_log
+    notes: "Baseline SSH/auth sample. Use for brute-force and login rule tests."

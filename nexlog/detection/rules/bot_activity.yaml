@@ -1,0 +1,169 @@
+﻿# detection/rules/bot_activity.yaml â€” NexLog v2
+# 7 rules â€” automated bot detection, headless browsers, scraper activity
+# Log sources: web access logs, application logs
+
+rules:
+
+  - id: BOT-001
+    name: Headless Browser / Automation Tool
+    description: >
+      User-Agent or request pattern indicating Selenium, Puppeteer,
+      Playwright, PhantomJS, or similar automation. Used for credential
+      stuffing, scraping, and CAPTCHA bypass.
+    severity: MEDIUM
+    category: bot_activity
+    confidence: 0.88
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)(HeadlessChrome|PhantomJS|Selenium|WebDriver|
+      puppeteer|playwright|Nightmare|zombie\.js|
+      htmlunit|httpclient|requests\s+library|
+      python-httpx|mechanize|scrapy|
+      Chrome/[0-9]+.*HeadlessChrome|
+      --headless|phantom|slimerjs)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_user_agent, http_uri]
+    tags: [headless_browser, automation, bot, scraper]
+
+  - id: BOT-002
+    name: High-Rate Request Flooding (Single IP)
+    description: >
+      Single IP making 100+ requests within 10 seconds. Indicates
+      automated tool â€” scraper, DDoS, credential stuffer, or fuzzer.
+    severity: HIGH
+    category: bot_activity
+    confidence: 0.85
+    type: threshold
+    group_by: source_ip
+    count: 100
+    window_secs: 10
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1499
+        technique_name: Endpoint Denial of Service
+    indicators: [source_ip, http_user_agent]
+    tags: [flood, rate_abuse, bot, dos]
+
+  - id: BOT-003
+    name: Missing or Blank User-Agent
+    description: >
+      HTTP request with no User-Agent header or empty string.
+      Legitimate browsers always send a UA. Absent UA = automated script.
+    severity: LOW
+    category: bot_activity
+    confidence: 0.70
+    type: regex
+    match_field: http_user_agent
+    pattern: '^(-|\\s*)$'
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_uri]
+    tags: [missing_ua, bot, automated]
+
+  - id: BOT-004
+    name: Credential Stuffing Bot Pattern
+    description: >
+      Automated login attempts with many different username/password combos
+      from single IP at machine speed. Distinguishes from human brute force
+      by raw request rate (50+/min is not humanly possible).
+    severity: HIGH
+    category: bot_activity
+    confidence: 0.87
+    type: threshold
+    group_by: source_ip
+    count: 50
+    window_secs: 60
+    count_distinct: username
+    filter:
+      http_status_in: [401, 403, 200]
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+        sub_technique: ".004"
+    indicators: [source_ip, http_uri, http_user_agent]
+    tags: [credential_stuffing, bot, automated, account_takeover]
+
+  - id: BOT-005
+    name: Web Scraper Content Harvesting
+    description: >
+      Systematic deep traversal of site pages at high rate â€” price scraping,
+      content theft, or competitive intelligence gathering.
+    severity: LOW
+    category: bot_activity
+    confidence: 0.68
+    type: threshold
+    group_by: source_ip
+    count: 200
+    window_secs: 300
+    filter:
+      http_status_in: [200]
+    mitre:
+      - tactic_id: TA0009
+        tactic_name: Collection
+        technique_id: T1213
+        technique_name: Data from Information Repositories
+    indicators: [source_ip, http_user_agent]
+    tags: [scraper, content_harvest, bot]
+
+  - id: BOT-006
+    name: Vulnerability Scanner Fingerprint
+    description: >
+      Request patterns matching automated vulnerability scanners beyond
+      known UA strings â€” probing for common CVE paths, default credentials,
+      and exposed admin panels.
+    severity: HIGH
+    category: bot_activity
+    confidence: 0.82
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/wp-login\.php|\/wp-admin\/|\/phpmyadmin\/|
+      \/adminer\.php|\/manager\/html|\/jmx-console|
+      \/solr\/admin|\/console\/login|
+      \/\.env$|\/config\.php\.bak|\/web\.config\.bak|
+      \/backup\.sql|\/dump\.sql|\/db\.sql|
+      \/credentials\.txt|\/passwords\.txt|
+      \/\.git\/config$|\/\.svn\/entries$|
+      \/actuator\/env|\/actuator\/heapdump)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+        sub_technique: ".002"
+    indicators: [source_ip, http_uri_decoded, http_user_agent]
+    tags: [vuln_scanner, path_probe, bot, recon]
+
+  - id: BOT-007
+    name: Distributed Bot Attack (Many IPs Same Target)
+    description: >
+      50+ distinct source IPs all hitting the same URI within 5 minutes.
+      Distributed attack â€” botnet credential stuffing, DDoS, or
+      distributed scanner hiding behind IP diversity.
+    severity: HIGH
+    category: bot_activity
+    confidence: 0.80
+    type: threshold
+    group_by: http_uri
+    count: 50
+    window_secs: 300
+    count_distinct: source_ip
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1499
+        technique_name: Endpoint Denial of Service
+        sub_technique: ".003"
+    indicators: [http_uri, http_user_agent]
+    tags: [distributed, botnet, ddos, credential_stuffing]

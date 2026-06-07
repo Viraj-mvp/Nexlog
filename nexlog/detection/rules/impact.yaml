@@ -1,0 +1,232 @@
+﻿# detection/rules/impact.yaml â€” NexLog v2
+# 8 rules â€” impact: ransomware, wipers, DDoS, service destruction
+# Log sources: Windows Event (4688/7036/7040), filesystem events,
+#              network logs, process logs, Sysmon
+#
+# Fills gap: T1486 (Data Encrypted for Impact / ransomware),
+# T1498 (Network DoS), T1485 (Data Destruction / wiper),
+# T1489 (Service Stop), T1491 (Defacement)
+# These are the FINAL PHASE â€” detection here means the attack succeeded.
+
+rules:
+
+  - id: IMP-001
+    name: Ransomware Mass File Encryption (T1486)
+    description: >
+      Rapid mass file renaming or creation with encryption extension patterns.
+      This is the clearest ransomware signal in filesystem audit logs.
+      By the time this fires, encryption is already in progress.
+    severity: CRITICAL
+    category: impact
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(\.encrypted$|\.locked$|\.enc$|\.crypt$|
+      \.WNCRY|\.wcry|\.wnry|\.wannacry|
+      \.RYUK|\.RYK|\.conti|\.CONTI|
+      \.lockbit|\.LockBit|\.LOCK|
+      \.REVIL|\.sodinokibi|\.BlackCat|
+      \.ALPHV|\.cl0p|\.Clop|\.hive|
+      \.readme.*\.txt|!!!.*READ.*!!!|
+      HOW_TO_DECRYPT|RESTORE_FILES|
+      mass.*rename.*\.(enc|locked|crypt)|
+      file.*extension.*changed.*[0-9]{3,})
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1486
+        technique_name: Data Encrypted for Impact
+    indicators: [hostname, username, message]
+    tags: [ransomware, encryption, critical, T1486, wannacry, lockbit]
+
+  - id: IMP-002
+    name: Ransomware Ransom Note Creation
+    description: >
+      Creation of ransom note files (README, HOW_TO_DECRYPT, RESTORE)
+      in multiple directories. Ransomware drops notes alongside encrypted files.
+    severity: CRITICAL
+    category: impact
+    confidence: 0.95
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(HOW_TO_DECRYPT\.(txt|html)|
+      RESTORE_FILES\.(txt|html)|
+      README_FOR_DECRYPT\.(txt|html)|
+      _readme\.txt|
+      !!!_HOW_TO_DECRYPT_!!!|
+      RECOVERY_INSTRUCTIONS\.(txt|html)|
+      .*decrypt.*instructions.*\.txt|
+      .*ransom.*note.*\.txt|
+      .*your.*files.*encrypted.*\.html)
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1486
+        technique_name: Data Encrypted for Impact
+    indicators: [hostname, username, message]
+    tags: [ransom_note, ransomware, critical, T1486]
+
+  - id: IMP-003
+    name: Wiper Malware â€” Disk / MBR Destruction (T1485)
+    description: >
+      Commands or tools overwriting disk sectors, MBR, or performing
+      secure delete operations at scale. NotPetya, WhisperGate,
+      and AcidRain wiper signatures.
+    severity: CRITICAL
+    category: impact
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(dd\s+if=\/dev\/zero\s+of=\/dev\/[sh]d|
+      dd\s+if=\/dev\/urandom\s+of=\/dev\/[sh]d|
+      shred\s+-[uzn].*\/dev\/|
+      wipe\s+-[qrf].*\/dev\/|
+      diskpart.*clean\s+all|
+      format\s+[cde]:\s+\/fs|
+      sdelete.*-[pza].*\/|
+      cipher\s+\/w:|
+      NotPetya|WhisperGate|AcidRain|
+      BootKit.*wipe|MBR.*overwrite|
+      WriteFile.*\\\\\.\\\\PHYSICALDRIVE)
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1485
+        technique_name: Data Destruction
+    indicators: [hostname, username, message]
+    tags: [wiper, disk_wipe, mbr_overwrite, critical, T1485]
+
+  - id: IMP-004
+    name: Network Denial of Service / Flood (T1498)
+    description: >
+      High-rate outbound UDP or ICMP floods from internal host.
+      Compromised host being used as DDoS botnet node.
+      Also covers SYN flood and amplification attack patterns.
+    severity: HIGH
+    category: impact
+    confidence: 0.80
+    type: threshold
+    group_by: source_ip
+    count: 500
+    window_secs: 10
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1498
+        technique_name: Network Denial of Service
+        sub_technique: ".001"
+    indicators: [source_ip, dest_ip]
+    tags: [ddos, flood, botnet_node, T1498]
+
+  - id: IMP-005
+    name: Critical Service Stopped / Disabled (T1489)
+    description: >
+      Core business services stopped: database, web server, backup,
+      domain controller services. EventID 7036 state change or
+      net stop / sc stop commands on critical service names.
+    severity: CRITICAL
+    category: impact
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((net\s+stop|sc\s+stop|sc\s+config.*disabled)\s+
+      (mssqlserver|mysql|postgresql|oracle|
+      "internet information services"|w3svc|
+      "windows backup"|wbengine|
+      vss|swprv|sqlwriter|
+      "sql server"|mongodb|redis|
+      kafka|elasticsearch|
+      "active directory"|ntds|kdc)|
+      EventID.*7036.*(stopped|disabled).*(sql|iis|mysql|ntds|kdc)|
+      service.*stopped.*(database|web\s+server|backup|domain))
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1489
+        technique_name: Service Stop
+    indicators: [hostname, username, message]
+    tags: [service_stop, database_kill, critical, T1489]
+
+  - id: IMP-006
+    name: Website Defacement Pattern
+    description: >
+      Web server content directory written to by non-web-service process,
+      or index files replaced with suspiciously small payloads.
+      Hacktivist and nation-state defacement attack signature.
+    severity: HIGH
+    category: impact
+    confidence: 0.75
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((index\.(html|php|asp|htm)|home\.(html|php))\s+
+      (overwritten|modified|replaced|written)|
+      (cp|mv|copy|move)\s+.*\s+(\/var\/www|C:\\inetpub|
+      C:\\xampp\\htdocs).*index\.(html|php)|
+      defac[ae]d|hacked\s+by|
+      echo.*deface.*>\s*(\/var\/www|index\.html)|
+      site.*replaced.*attacker)
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1491
+        technique_name: Defacement
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [defacement, website, impact, hacktivist]
+
+  - id: IMP-007
+    name: Firmware / Boot Record Attack
+    description: >
+      Attempts to modify UEFI firmware, boot sector, or BIOS settings.
+      LoJax, Mosaic Regressor, and MosaicRegressor write to UEFI.
+      bcdedit, efibootmgr, flashrom used for bootkit installation.
+    severity: CRITICAL
+    category: impact
+    confidence: 0.87
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(efibootmgr\s+-[cCdD]|
+      flashrom\s+(-w|-r)\s+.*\.bin|
+      bcdedit\s+\/set\s+.*safeboot|
+      bcdedit.*bootsequence|
+      bcdedit.*path.*bootmgfw\.efi|
+      rweverything|RWEverything|
+      UEFI.*write|SPI\s+flash.*write|
+      LoJax|MosaicRegressor|CosmicStrand|
+      SetVariable.*Global.*BootOrder)
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1542
+        technique_name: Pre-OS Boot
+        sub_technique: ".003"
+    indicators: [hostname, username, message]
+    tags: [firmware, uefi, bootkit, critical, T1542]
+
+  - id: IMP-008
+    name: Log Flood / SIEM Overwhelm Attack
+    description: >
+      Extremely high rate of log generation from single source â€” attacker
+      intentionally flooding log pipeline to hide malicious events in noise
+      or overwhelm SIEM storage. 1000+ events/second is never legitimate.
+    severity: HIGH
+    category: impact
+    confidence: 0.75
+    type: threshold
+    group_by: source_ip
+    count: 1000
+    window_secs: 10
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1562
+        technique_name: Impair Defenses
+        sub_technique: ".006"
+    indicators: [source_ip]
+    tags: [log_flood, siem_overwhelm, defense_evasion, impact]

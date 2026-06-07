@@ -1,0 +1,227 @@
+﻿# detection/rules/defense_evasion.yaml â€” NexLog v2
+# 8 rules â€” defense evasion, anti-forensics, obfuscation, log tampering
+# Log sources: Windows Event (1102/4688/7036/7040), Sysmon, auth.log, process logs
+#
+# Defense evasion is often the FIRST thing attackers do AFTER gaining access.
+# These rules detect anti-forensics activity visible IN logs â€” before logs disappear.
+
+rules:
+
+  - id: EVA-001
+    name: Windows Event Log Service Stopped
+    description: >
+      Windows Event Log service (EventLog) stopped or disabled.
+      EventID 7036 (service state change) or 7040 (start type changed).
+      After this, further attacker activity is NOT logged.
+    severity: CRITICAL
+    category: defense_evasion
+    confidence: 0.95
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(EventID.*(7036|7040).*EventLog|
+      Windows\s+Event\s+Log.*stopped|
+      sc\s+(stop|config|delete)\s+EventLog|
+      net\s+stop\s+EventLog|
+      Set-Service.*EventLog.*Disabled|
+      wevtutil.*sl.*enabled.*false)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1562
+        technique_name: Impair Defenses
+        sub_technique: ".002"
+    indicators: [hostname, username, message]
+    tags: [log_tampering, service_stop, defense_evasion, critical]
+
+  - id: EVA-002
+    name: Sysmon / AV / EDR Service Killed
+    description: >
+      Security monitoring service (Sysmon, Windows Defender, CrowdStrike,
+      SentinelOne, Carbon Black) stopped or killed. Attacker blinding
+      visibility before executing next stage.
+    severity: CRITICAL
+    category: defense_evasion
+    confidence: 0.93
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(sc\s+(stop|delete)\s+(sysmon|MsMpSvc|WinDefend|
+      SentinelAgent|CsFalconService|cbdefense|csagent|
+      MBAMService|avast|avg|mcafee|symantec)|
+      net\s+stop\s+(sysmon|MsMpSvc|WinDefend|csagent)|
+      taskkill.*\/f.*(sysmon|MsMpEng|SentinelOne|falcon)|
+      Unloading\s+Sysmon|
+      HKLM.*SYSTEM.*CurrentControlSet.*Services.*Sysmon.*Delete)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1562
+        technique_name: Impair Defenses
+        sub_technique: ".001"
+    indicators: [hostname, username, message, process_name]
+    tags: [sysmon_kill, av_kill, edr_kill, defense_evasion, critical]
+
+  - id: EVA-003
+    name: Timestomping â€” File Timestamp Modification
+    description: >
+      File MACE timestamps modified to hide when files were created or modified.
+      Attacker anti-forensics. Sysmon EID 2 (file creation time changed)
+      or touch command with -d flag on Linux.
+    severity: HIGH
+    category: defense_evasion
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Sysmon.*EventID.*2|file\s+creation\s+time\s+changed|
+      touch\s+-[drtm]|
+      SetFileTime|NtSetInformationFile.*BasicInfo|
+      timestomp|powershell.*\[io\.file\].*SetLastWriteTime|
+      \[system\.io\.file\]::SetCreationTime|
+      \[system\.io\.file\]::SetLastAccessTime)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1070
+        technique_name: Indicator Removal
+        sub_technique: ".006"
+    indicators: [hostname, username, message]
+    tags: [timestomping, anti_forensics, defense_evasion]
+
+  - id: EVA-004
+    name: Bash History Cleared or Disabled
+    description: >
+      Linux bash history file cleared, disabled, or redirected to /dev/null.
+      Removes command evidence on Linux hosts post-compromise.
+    severity: HIGH
+    category: defense_evasion
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(unset\s+HISTFILE|HISTFILE=\/dev\/null|
+      HISTSIZE=0|HISTFILESIZE=0|
+      history\s+-[cwn]|>\s*~\/\.bash_history|
+      cat\s+\/dev\/null\s*>\s*.*\.bash_history|
+      rm\s+(~\/)?\.bash_history|
+      export\s+HISTIGNORE=\*|
+      set\s+\+o\s+history)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1070
+        technique_name: Indicator Removal
+        sub_technique: ".003"
+    indicators: [hostname, username, message]
+    tags: [bash_history, linux, anti_forensics, defense_evasion]
+
+  - id: EVA-005
+    name: Process Hollowing / Injection Indicator
+    description: >
+      Sysmon EID 8 (CreateRemoteThread) or suspicious process relationships:
+      a legitimate process (svchost, explorer, notepad) spawning unusual
+      child processes. Hallmark of process injection / hollowing.
+    severity: CRITICAL
+    category: defense_evasion
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(CreateRemoteThread|VirtualAllocEx|WriteProcessMemory|
+      Sysmon.*EventID.*8|
+      SourceImage.*(svchost|explorer|notepad|msiexec|
+      dllhost|rundll32).*TargetImage.*(cmd|powershell|wscript|
+      cscript|mshta|wmic|regsvr32)|
+      Hollowing|process\s+injection|
+      mavinject|Process\s+Ghosting|
+      AtomBombing|QueueUserAPC.*shellcode)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1055
+        technique_name: Process Injection
+    indicators: [hostname, message, process_name]
+    tags: [process_injection, hollowing, defense_evasion, critical]
+
+  - id: EVA-006
+    name: AMSI / ETW Bypass Attempt
+    description: >
+      Known AMSI (Antimalware Scan Interface) or ETW (Event Tracing)
+      bypass patterns in PowerShell or script logs. Disables security
+      telemetry before executing malicious script.
+    severity: CRITICAL
+    category: defense_evasion
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(\[Ref\]\.Assembly\.GetType.*amsi|
+      amsiInitFailed|amsiContext|
+      \[Runtime\.InteropServices\.Marshal\]::Copy.*amsi|
+      Set-MpPreference.*DisableRealtimeMonitoring|
+      Add-MpPreference.*ExclusionPath|
+      \[System\.Diagnostics\.Eventing.*provider.*0\]|
+      ETWEventWrite.*0|EtwpCreateEtwThread)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1562
+        technique_name: Impair Defenses
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [amsi_bypass, etw_patch, defense_evasion, critical, powershell]
+
+  - id: EVA-007
+    name: Double URL / Unicode Encoding Evasion
+    description: >
+      Double URL encoding (%25xx), Unicode encoding (%uXXXX), or null
+      byte injection in URI. Used to bypass WAF/IDS signature matching
+      while delivering the same attack payload.
+    severity: MEDIUM
+    category: defense_evasion
+    confidence: 0.80
+    type: regex
+    match_field: http_uri
+    pattern: >-
+      (?i)(%25[2-7][0-9a-f]|%252[0-9a-f]|
+      %u00[0-9a-f]{2}|%u[0-9a-f]{4}|
+      %00|\\x00|\\u0000|
+      \.\./.*%2[ef]|
+      %[0-9a-f]{2}%[0-9a-f]{2}%[0-9a-f]{2}%[0-9a-f]{2}%[0-9a-f]{2})
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1027
+        technique_name: Obfuscated Files or Information
+    indicators: [source_ip, http_uri, http_user_agent]
+    tags: [double_encoding, unicode_evasion, waf_bypass, defense_evasion]
+
+  - id: EVA-008
+    name: Alternate Data Stream (ADS) Usage
+    description: >
+      NTFS Alternate Data Stream used to hide payloads in a file's
+      metadata stream (file.txt:hidden.exe). Sysmon EID 15 or process
+      execution from a path containing a colon separator.
+    severity: HIGH
+    category: defense_evasion
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Sysmon.*EventID.*15|
+      AlternateDataStream|
+      zone\.identifier|
+      :\s*(payload|hidden|stream|data|exec)\s*$|
+      type\s+.*\s*>\s*[^:]+:[^:]+|
+      more\s*<\s*[^:]+:[^:]+|
+      wscript.*[^:]+:[^:]+\.js|
+      echo.*>\s*[^\s:]+:[^\s:]+)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1564
+        technique_name: Hide Artifacts
+        sub_technique: ".004"
+    indicators: [hostname, username, message]
+    tags: [ads, alternate_data_stream, ntfs, defense_evasion, hidden_file]

@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible NexLog problem.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve NexLog. Do not attach real evidence, case databases, API keys, or private logs to public issues.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic or redacted sample data only.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Python version, NexLog version or commit, and interface used.
+      placeholder: |
+        OS:
+        Python:
+        NexLog:
+        Interface: CLI / GUI / Web / Docker
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste redacted logs, tracebacks, or screenshots.
+      render: text
+    validations:
+      required: false

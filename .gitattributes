@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.facase binary
+*.sqlite binary
+*.db binary
+
+release/** export-ignore
+workspace/** export-ignore
+.venv/** export-ignore
+venv/** export-ignore
+env/** export-ignore
+__pycache__/** export-ignore
+*.pyc export-ignore
+.env export-ignore

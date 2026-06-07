@@ -1,0 +1,232 @@
+﻿# detection/rules/api_security.yaml â€” NexLog v2
+# 9 rules â€” API-specific attacks: OWASP API Top 10 2023
+# Log sources: API gateway logs, web access logs, application logs
+#
+# Web attacks (WEB-*.yaml) cover injection. This file covers
+# API-SPECIFIC attack patterns that only exist in API architectures:
+# GraphQL abuse, versioning bypass, mass assignment, broken function-level auth.
+
+rules:
+
+  - id: API-001
+    name: GraphQL Introspection Abuse
+    description: >
+      GraphQL __schema or __type introspection queries used to enumerate
+      the entire API schema. First step in targeted GraphQL attack.
+    severity: MEDIUM
+    category: api_attack
+    confidence: 0.82
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\{__schema|\{__type|__schema\s*\{|__type\s*\{|
+      query.*__schema.*types|introspectionquery|
+      \{__typename|schema.*fields.*name.*type)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_uri_decoded, http_user_agent]
+    tags: [graphql, introspection, api_recon, owasp-api-3]
+
+  - id: API-002
+    name: GraphQL Injection / Batching Attack
+    description: >
+      GraphQL query batching used to amplify brute force (send 1000
+      login mutations in one request) or inject malicious field arguments.
+      Also covers alias-based query batching bypass.
+    severity: HIGH
+    category: api_attack
+    confidence: 0.80
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\[.*\{.*mutation.*login.*\}.*\{.*mutation.*login|
+      alias\d+\s*:\s*\w+|
+      query.*\$.*UNION|
+      fragment.*on.*__Schema|
+      .*\{.*\$.*\}\s*\{.*\$|
+      mutation.*\{.*login.*password.*\}.*mutation.*\{.*login)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+    indicators: [source_ip, http_uri_decoded]
+    tags: [graphql, batching, injection, api_attack]
+
+  - id: API-003
+    name: API Version Downgrade Attack
+    description: >
+      Requests targeting deprecated API versions (v1, v0) that may
+      lack security controls present in current versions.
+      Attackers intentionally target old endpoints with weaker auth.
+    severity: MEDIUM
+    category: api_attack
+    confidence: 0.72
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/api\/v[01](\/|$)|\/api\/v1\.0(\/|$)|
+      \/api\/beta\/(admin|users|internal)|
+      \/api\/legacy\/|\/api\/old\/|
+      \/v1\/(internal|admin|debug)|
+      \/rest\/v1\/admin)
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [source_ip, http_uri_decoded, http_method]
+    tags: [api_versioning, downgrade, legacy_endpoint, owasp-api-9]
+
+  - id: API-004
+    name: Mass Assignment / Parameter Pollution
+    description: >
+      POST/PUT body containing privileged parameter names that should not
+      be user-settable: role, isAdmin, admin, privilege, verified, balance.
+      Mass assignment allows privilege escalation via API parameter injection.
+    severity: HIGH
+    category: api_attack
+    confidence: 0.78
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)("(isAdmin|is_admin|role|privilege|admin|
+      verified|approved|activated|balance|credit|
+      group_id|permission|scope|access_level)"\s*:\s*
+      (true|1|"admin"|"superuser"|"root")|
+      (isAdmin|is_admin|role|admin)=true|
+      privilege=(admin|root|superadmin))
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [source_ip, http_uri_decoded, username, http_method]
+    tags: [mass_assignment, parameter_pollution, owasp-api-3, priv_esc]
+
+  - id: API-005
+    name: Broken Function Level Authorization
+    description: >
+      Non-admin user accessing administrative API functions directly.
+      Requests to /admin/, /internal/, /management/ endpoints without
+      proper role â€” BFLA (OWASP API Security Top 10 #5).
+    severity: HIGH
+    category: api_attack
+    confidence: 0.80
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/api\/.*(admin|internal|management|superuser|privileged)\/|
+      \/admin\/api\/|\/api\/admin\/|
+      DELETE\s+\/api\/v[0-9]+\/users\/|
+      PUT\s+\/api\/v[0-9]+\/(roles|permissions|groups)\/|
+      PATCH\s+\/api\/v[0-9]+\/users\/[^\/]+\/(role|permission))
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [source_ip, username, http_uri_decoded, http_method]
+    tags: [bfla, broken_function_auth, owasp-api-5, admin_bypass]
+
+  - id: API-006
+    name: API Rate Limit Bypass Attempt
+    description: >
+      Known rate-limit bypass techniques: rotating X-Forwarded-For headers,
+      using many IPs for same operation, or adding padding to bypass
+      request deduplication. Precursor to credential stuffing.
+    severity: MEDIUM
+    category: api_attack
+    confidence: 0.73
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(X-Forwarded-For:\s*([0-9]{1,3}\.){3}[0-9]{1,3},\s*
+      ([0-9]{1,3}\.){3}[0-9]{1,3}|
+      X-Real-IP.*X-Forwarded-For|
+      Client-IP.*127\.0\.0\.1|
+      X-Originating-IP.*127\.|
+      CF-Connecting-IP.*127\.|
+      429.*retry-after.*0)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+    indicators: [source_ip, message, http_uri]
+    tags: [rate_limit_bypass, header_spoofing, api_attack, owasp-api-4]
+
+  - id: API-007
+    name: Unrestricted Resource Consumption â€” Large Payload
+    description: >
+      API POST request with payload over 10MB, or repeated requests
+      with deeply nested JSON. Can crash backend services or trigger
+      deserialization vulnerabilities.
+    severity: MEDIUM
+    category: api_attack
+    confidence: 0.70
+    type: regex
+    match_field: http_bytes
+    pattern: '^[1-9]\d{7,}$'
+    filter:
+      http_method: POST
+    mitre:
+      - tactic_id: TA0040
+        tactic_name: Impact
+        technique_id: T1499
+        technique_name: Endpoint Denial of Service
+    indicators: [source_ip, http_uri, http_bytes, http_method]
+    tags: [payload_bomb, large_upload, api_attack, owasp-api-4, dos]
+
+  - id: API-008
+    name: Server-Sent Events / WebSocket Hijacking
+    description: >
+      SSE or WebSocket upgrade requests with missing or forged Origin headers.
+      Cross-site WebSocket hijacking allows reading authenticated data streams.
+    severity: HIGH
+    category: api_attack
+    confidence: 0.75
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Upgrade:\s*websocket.*Origin:\s*null|
+      Upgrade:\s*websocket.*Origin:\s*https?://(?!.*same-origin)|
+      text\/event-stream.*Origin:\s*null|
+      websocket.*CSWSH|cross.site.*websocket|
+      Upgrade:\s*websocket\s*\n(?!.*Origin:))
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1539
+        technique_name: Steal Web Session Cookie
+    indicators: [source_ip, message, http_uri]
+    tags: [websocket_hijack, cswsh, sse, api_attack]
+
+  - id: API-009
+    name: Swagger / OpenAPI Spec Public Exposure
+    description: >
+      Requests to API documentation endpoints that expose full API spec.
+      Not an attack itself â€” but a reconnaissance signal that immediately
+      precedes targeted API attacks. Log it and correlate with subsequent events.
+    severity: LOW
+    category: api_attack
+    confidence: 0.68
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/swagger(-ui)?(\.html|\.json|\/|$)|
+      \/openapi\.(json|yaml)(\/|$)|
+      \/api-docs(\/|$)|\/v[23]\/api-docs|
+      \/swagger\/v[0-9]+\/swagger\.json|
+      \/redoc(\/|$)|\/rapidoc(\/|$)|
+      \/api\/schema\.(json|yaml))
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [source_ip, http_uri_decoded, http_user_agent]
+    tags: [swagger, openapi_exposure, api_recon, owasp-api-3]

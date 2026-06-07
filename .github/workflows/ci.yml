@@ -1,0 +1,96 @@
+name: NexLog CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[web,gui,ai,intel,dev]"
+      - name: Run full test suite
+        run: python -m pytest tests/ -v --tb=short --strict-markers
+      - name: Verify test count
+        run: |
+          COUNT=$(python -m pytest tests/ --co -q 2>/dev/null | tail -1 | grep -oP '\d+' | head -1)
+          echo "Collected $COUNT tests"
+          [ "${COUNT:-0}" -gt 0 ]
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: website
+      - name: Build frontend
+        run: npm run build
+        working-directory: website
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install scanners
+        run: pip install bandit pip-audit
+      - name: Bandit SAST
+        run: bandit -r . -ll -x tests/,.venv/,venv/ --format json -o bandit-report.json || true
+      - name: pip-audit
+        run: pip-audit -r requirements.txt || true
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  secrets:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f packaging/Dockerfile -t nexlog:ci .
+      - name: Smoke test
+        run: |
+          docker run --rm -d -p 8000:8000 \
+            -e NEXLOG_API_KEY=ci-test-key \
+            --name nexlog_ci nexlog:ci
+          sleep 8
+          curl -sf http://localhost:8000/api/health && echo "Health OK"
+          docker stop nexlog_ci

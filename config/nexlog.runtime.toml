@@ -1,0 +1,18 @@
+[runtime]
+# adaptive | performance | conservative
+hardware_mode = "adaptive"
+
+# fast | balanced | deep
+profile = "balanced"
+
+max_workers = 2
+batch_size = 5000
+max_memory_mb = 2048
+max_cpu_percent = 75
+max_line_bytes = 1048576
+
+# auto | on | off
+gpu_gui = "auto"
+# Optional override. Leave commented so each hardware mode uses its safe cap.
+# graph_node_limit = 48
+reduced_motion = false

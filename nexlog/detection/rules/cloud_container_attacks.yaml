@@ -1,0 +1,207 @@
+﻿# detection/rules/cloud_container_attacks.yaml â€” NexLog v2
+# 9 rules â€” AWS/Azure/GCP cloud attacks, container escape, Kubernetes abuse
+
+rules:
+
+  - id: CLOUD-001
+    name: AWS IMDSv1 Metadata Credential Theft
+    description: >
+      HTTP GET to 169.254.169.254 without IMDSv2 token header.
+      SSRF attackers use this to steal temporary IAM credentials.
+    severity: CRITICAL
+    category: cloud_attack
+    confidence: 0.90
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(169\.254\.169\.254/latest/(meta-data|dynamic|user-data)|
+      169\.254\.169\.254/latest/meta-data/iam/security-credentials|
+      metadata\.google\.internal/computeMetadata|
+      169\.254\.169\.254/metadata/instance)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".005"
+    indicators: [source_ip, http_uri_decoded, http_user_agent]
+    tags: [aws_imds, ssrf, cloud, credential_theft, portfolio-worthy]
+
+  - id: CLOUD-002
+    name: AWS CloudTrail High-Risk API Call
+    description: >
+      Sensitive IAM/security API: attach admin policy, create access key,
+      stop logging, or open security groups. Single event is sufficient.
+    severity: HIGH
+    category: cloud_attack
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(AttachUserPolicy|AttachRolePolicy|CreateAccessKey|
+      DeleteAccessKey|StopLogging|DeleteTrail|UpdateTrail|
+      AuthorizeSecurityGroupIngress|DeleteFlowLogs|
+      PutBucketPolicy.*public|CreateLoginProfile|
+      UpdateLoginProfile|PutRolePolicy.*AdministratorAccess)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1078
+        technique_name: Valid Accounts
+        sub_technique: ".004"
+    indicators: [source_ip, username, message]
+    tags: [cloudtrail, aws_iam, privilege_escalation, cloud]
+
+  - id: CLOUD-003
+    name: Kubernetes Privileged Pod / HostPath Mount
+    description: >
+      Pod created with hostPath volume, hostPID, hostNetwork, or privileged=true.
+      Classic container escape vector â€” gives container host-level access.
+    severity: CRITICAL
+    category: cloud_attack
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(hostPath.*path.*/(etc|proc|sys|var|root)|
+      hostPID:\s*true|hostNetwork:\s*true|hostIPC:\s*true|
+      privileged:\s*true|allowPrivilegeEscalation:\s*true|
+      mountPath.*\/host)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1611
+        technique_name: Escape to Host
+    indicators: [hostname, username, message]
+    tags: [kubernetes, container_escape, privileged_pod, portfolio-worthy]
+
+  - id: CLOUD-004
+    name: Docker Socket Mounted in Container
+    description: >
+      /var/run/docker.sock mounted inside container.
+      Grants full Docker daemon control and trivial host escape.
+    severity: CRITICAL
+    category: cloud_attack
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(\/var\/run\/docker\.sock|
+      -v\s+\/var\/run\/docker\.sock|
+      docker\.sock.*Bind|hostPath.*docker\.sock)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1611
+        technique_name: Escape to Host
+    indicators: [hostname, message]
+    tags: [docker_socket, container_escape, critical]
+
+  - id: CLOUD-005
+    name: Kubernetes Service Account Token Theft
+    description: >
+      Path traversal or web shell accessing Kubernetes service account
+      token file. Gives attacker API server authentication.
+    severity: CRITICAL
+    category: cloud_attack
+    confidence: 0.87
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/var\/run\/secrets\/kubernetes\.io\/serviceaccount|
+      serviceaccount\/token|kubernetes\.io\/service-account-token)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1528
+        technique_name: Steal Application Access Token
+    indicators: [source_ip, http_uri_decoded, hostname]
+    tags: [kubernetes, service_account, token_theft, cloud]
+
+  - id: CLOUD-006
+    name: AWS Root Account Usage
+    description: >
+      CloudTrail event from root account. Root should never be used
+      operationally. Any root activity is a P0 incident.
+    severity: CRITICAL
+    category: cloud_attack
+    confidence: 0.97
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)("type"\s*:\s*"Root"|userIdentity.*Root|
+      root.*ConsoleLogin|"userName"\s*:\s*"root")
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1078
+        technique_name: Valid Accounts
+        sub_technique: ".004"
+    indicators: [source_ip, message]
+    tags: [aws_root, cloud, critical, interview-testable]
+
+  - id: CLOUD-007
+    name: Kubectl Exec into Running Pod
+    description: >
+      kubectl exec or API /exec endpoint called on a running pod.
+      Rarely legitimate in production â€” always investigate.
+    severity: HIGH
+    category: cloud_attack
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(kubectl\s+exec|\/api\/v1\/namespaces\/.*\/pods\/.*\/exec|
+      pods\/exec\s+UPGRADE|exec.*stdin.*stdout.*tty)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1609
+        technique_name: Container Administration Command
+    indicators: [source_ip, username, message, hostname]
+    tags: [kubernetes, kubectl_exec, container, cloud]
+
+  - id: CLOUD-008
+    name: GCP / Azure Metadata SSRF Probe
+    description: >
+      SSRF targeting GCP metadata server or Azure IMDS endpoint.
+      Attacker stealing service account tokens or managed identity credentials.
+    severity: HIGH
+    category: cloud_attack
+    confidence: 0.88
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(metadata\.google\.internal|169\.254\.169\.254/metadata|
+      http://169\.254\.169\.254|Metadata-Flavor.*Google|
+      metadata\.azure\.internal|imds\.azure\.internal)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".005"
+    indicators: [source_ip, http_uri_decoded]
+    tags: [gcp_metadata, azure_imds, ssrf, cloud]
+
+  - id: CLOUD-009
+    name: Lambda / Serverless Secrets Exposure
+    description: >
+      CloudTrail: GetFunction or GetFunctionConfiguration exposes
+      environment variables which commonly contain DB passwords, API keys.
+    severity: HIGH
+    category: cloud_attack
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(GetFunction\b|ListFunctions\b|GetFunctionConfiguration|
+      lambda.*environment.*variables|InvokeFunction.*payload|
+      UpdateFunctionCode)
+    mitre:
+      - tactic_id: TA0009
+        tactic_name: Collection
+        technique_id: T1213
+        technique_name: Data from Information Repositories
+    indicators: [source_ip, username, message]
+    tags: [lambda, serverless, aws, secrets_exposure]

@@ -1,0 +1,218 @@
+﻿# detection/rules/insider_threat.yaml â€” NexLog v2
+# 8 rules â€” insider threat, data hoarding, privilege abuse, anomalous access
+# Log sources: web access logs, Windows Event (4624/4688/4663), DLP logs,
+#              database audit logs, file access logs, auth.log
+#
+# Insider threat is fundamentally different from external attack:
+# the actor is AUTHENTICATED and their activity looks like normal work.
+# Detection relies on BEHAVIOURAL ANOMALIES not attack signatures.
+# These rules focus on what appears in LOGS â€” not endpoint DLP agents.
+
+rules:
+
+  - id: INSD-001
+    name: Off-Hours Access to Sensitive Resource
+    description: >
+      Authenticated access between 22:00â€“06:00 local time to sensitive
+      paths (/admin, /export, /reports, /api/bulk). Legitimate employees
+      rarely need bulk data access in the middle of the night.
+    severity: MEDIUM
+    category: insider_threat
+    confidence: 0.68
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/admin(\/|$)|\/export(\/|\?|$)|\/reports?(\/|\?|$)|
+      \/api\/(bulk|export|dump|download|backup)|
+      \/data\/(export|download|dump)|\/backup(s)?(\/|$)|
+      \/download.*\.(sql|csv|xlsx|zip|tar|gz)$)
+    mitre:
+      - tactic_id: TA0009
+        tactic_name: Collection
+        technique_id: T1213
+        technique_name: Data from Information Repositories
+    indicators: [source_ip, username, http_uri_decoded, timestamp]
+    tags: [insider_threat, off_hours, data_access, behavioural]
+
+  - id: INSD-002
+    name: Bulk Data Export / Mass Download
+    description: >
+      Single authenticated user downloading an unusually large number of
+      files or records in a short window. Pre-departure data theft pattern.
+      Threshold: 30+ download requests within 10 minutes.
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.75
+    type: threshold
+    group_by: username
+    count: 30
+    window_secs: 600
+    filter:
+      http_status_in: [200]
+    mitre:
+      - tactic_id: TA0009
+        tactic_name: Collection
+        technique_id: T1005
+        technique_name: Data from Local System
+    indicators: [username, source_ip, http_uri]
+    tags: [bulk_download, insider_threat, data_hoarding]
+
+  - id: INSD-003
+    name: Database Mass SELECT / Dump Query
+    description: >
+      Unusually large SELECT query or explicit dump commands in database
+      audit logs. SELECT * with no WHERE clause on sensitive tables
+      or explicit table dump. Insider preparing data for exfiltration.
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(SELECT\s+\*\s+FROM\s+(users|customers|employees|
+      credit_cards?|payments?|salaries|medical_records?|
+      patients?|accounts?|orders?|secrets?|tokens?)\s*;|
+      mysqldump\s+|pg_dump\s+|BACKUP\s+DATABASE|
+      SELECT\s+.*INTO\s+OUTFILE|
+      \bEXPORT\b.*\bTABLE\b|bcp\s+.*queryout)
+    mitre:
+      - tactic_id: TA0009
+        tactic_name: Collection
+        technique_id: T1213
+        technique_name: Data from Information Repositories
+    indicators: [username, source_ip, message]
+    tags: [database_dump, insider_threat, data_exfil, sql]
+
+  - id: INSD-004
+    name: Privilege Use Outside Normal Pattern
+    description: >
+      Privileged account (admin, root, DBA, sysadmin) performing
+      actions outside their typical scope: file access, process creation,
+      network connections. Windows EventID 4648 (explicit credential use).
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.72
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(EventID.*4648|RunAs.*admin|
+      sudo\s+(-u\s+root\s+)?(bash|sh|python|perl|wget|curl|nc)|
+      su\s+-\s+root|
+      Privilege\s+Use.*Special\s+Privileges|
+      SeDebugPrivilege|SeTakeOwnershipPrivilege|
+      SeLoadDriverPrivilege)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1078
+        technique_name: Valid Accounts
+    indicators: [username, source_ip, hostname, message]
+    tags: [privilege_use, insider_threat, explicit_credential, windows]
+
+  - id: INSD-005
+    name: USB / Removable Media Mount (Windows)
+    description: >
+      Removable storage device connected â€” EventID 6416 (new device
+      installed) or setupapi.log entries. Insider copying data to USB
+      is the most common physical exfiltration method.
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(EventID.*6416|
+      A\s+new\s+external\s+device\s+was\s+recognized|
+      removable\s+storage\s+device|
+      USB.*STOR|USBSTOR|
+      setupapi.*USB\\|
+      DriveLetter.*[E-Z]:\\.*USB|
+      volume.*mounted.*removable)
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1052
+        technique_name: Exfiltration Over Physical Medium
+        sub_technique: ".001"
+    indicators: [username, hostname, message]
+    tags: [usb, removable_media, physical_exfil, insider_threat]
+
+  - id: INSD-006
+    name: Email / Cloud Storage Exfiltration Prep
+    description: >
+      Files sent to personal cloud storage (Dropbox, Google Drive, WeTransfer,
+      OneDrive personal) or personal email domains from corporate network.
+      Classic pre-resignation data theft channel.
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.75
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(dropbox\.com\/upload|
+      drive\.google\.com\/upload|
+      wetransfer\.com\/upload|
+      onedrive\.live\.com\/upload|
+      send\.firefox\.com|
+      mega\.nz\/upload|
+      box\.com\/upload|
+      paste\.ee|pastebin\.com\/add|
+      transfer\.sh\/upload)
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1567
+        technique_name: Exfiltration Over Web Service
+        sub_technique: ".002"
+    indicators: [source_ip, username, http_uri_decoded, http_bytes]
+    tags: [cloud_storage, personal_upload, insider_threat, exfil]
+
+  - id: INSD-007
+    name: Account Enumeration by Authenticated User
+    description: >
+      Authenticated user systematically querying the user directory, HR
+      system, or LDAP â€” searching for target accounts or org structure.
+      Threshold: 20+ distinct user profile requests within 5 minutes.
+    severity: MEDIUM
+    category: insider_threat
+    confidence: 0.70
+    type: threshold
+    group_by: username
+    count: 20
+    window_secs: 300
+    count_distinct: http_uri
+    filter:
+      http_status_in: [200]
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1087
+        technique_name: Account Discovery
+    indicators: [username, source_ip, http_uri]
+    tags: [account_enum, insider_threat, ldap_recon]
+
+  - id: INSD-008
+    name: Impossible Travel Login
+    description: >
+      Same username authenticating from two geographically distant
+      source IPs within a time window physically impossible to travel.
+      Indicator of shared credentials or account compromise.
+      Note: requires GeoIP enrichment â€” confidence lower without it.
+    severity: HIGH
+    category: insider_threat
+    confidence: 0.65
+    type: sequence
+    steps:
+      - match_field: auth_result
+        value: success
+      - match_field: auth_result
+        value: success
+    group_by: username
+    window_secs: 3600
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1078
+        technique_name: Valid Accounts
+    indicators: [username, source_ip, timestamp]
+    tags: [impossible_travel, insider_threat, account_compromise, geoip]

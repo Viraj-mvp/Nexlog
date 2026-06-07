@@ -1,0 +1,192 @@
+﻿# detection/rules/ai_llm_attacks.yaml â€” NexLog v2
+# 8 rules â€” AI/LLM attack surface: prompt injection, model abuse, agent exploitation
+# World-first open-source DFIR rule set for AI-era log forensics.
+
+rules:
+
+  - id: AI-001
+    name: Direct Prompt Injection in HTTP Request
+    description: >
+      Semantic override instructions in HTTP parameters targeting LLM backend.
+      Attacker attempts to hijack model behavior via user input.
+    severity: HIGH
+    category: ai_attack
+    confidence: 0.83
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(ignore\s+(previous|all|above|prior)\s+(instructions?|prompts?|context)|
+      system\s*prompt:|you\s+are\s+now\s+(a|an)\s+|
+      disregard\s+(all\s+)?(previous|prior|above)|
+      forget\s+your\s+(instructions?|training|rules)|
+      \[INST\]|\[\/INST\]|JAILBREAK|DAN\s*mode|
+      developer\s+mode\s+enabled|act\s+as\s+(DAN|AIM|STAN))
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0051
+        technique_name: LLM Prompt Injection
+    indicators: [http_uri_decoded, source_ip, http_user_agent]
+    tags: [prompt_injection, llm, ai_attack, portfolio-worthy, world-first]
+
+  - id: AI-002
+    name: Indirect Prompt Injection via Log Fields
+    description: >
+      Prompt injection in User-Agent or headers â€” recursive attack targeting
+      LLM backends that ingest logs. Injecting into logs to attack the analyzer.
+    severity: CRITICAL
+    category: ai_attack
+    confidence: 0.85
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)(ignore\s+(previous|all)\s+instructions?|system\s*prompt:|
+      you\s+are\s+now|\[INST\]|\[SYS\]|forget\s+your|
+      disregard\s+(all|prior)|###\s*Instruction|OVERRIDE\s+MODE)
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0051
+        technique_name: LLM Prompt Injection
+    indicators: [http_user_agent, source_ip, http_uri]
+    tags: [indirect_injection, log_poisoning, ai_attack, world-first]
+
+  - id: AI-003
+    name: LLM API Endpoint Rate Probe
+    description: >
+      Rapid requests to LLM API paths from single IP.
+      Could be model extraction, API key brute force, or rate limit bypass.
+    severity: MEDIUM
+    category: ai_attack
+    confidence: 0.75
+    type: threshold
+    group_by: source_ip
+    count: 20
+    window_secs: 60
+    filter:
+      http_status_in: [200, 400, 401, 429]
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0043
+        technique_name: Craft Adversarial Data
+    indicators: [source_ip, http_uri, http_user_agent]
+    tags: [llm_api, rate_probe, model_extraction, ai_attack]
+
+  - id: AI-004
+    name: Training Data / System Prompt Extraction
+    description: >
+      Queries designed to extract system prompt, training data, or
+      memorised PII from an LLM. Verbatim extraction probes.
+    severity: HIGH
+    category: ai_attack
+    confidence: 0.78
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(repeat\s+(the\s+)?(exact\s+)?(words?|text|training)\s+|
+      what\s+(is\s+)?(your\s+)?(system\s+prompt|instructions?)|
+      tell\s+me\s+your\s+(initial\s+)?(prompt|instructions?)|
+      print\s+your\s+(system\s+)?instructions?|
+      output\s+your\s+(training\s+)?data|
+      reveal\s+(your\s+)?(prompt|instructions?))
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0037
+        technique_name: Data from Information Repositories
+    indicators: [http_uri_decoded, source_ip, http_user_agent]
+    tags: [model_extraction, data_extraction, llm, ai_attack]
+
+  - id: AI-005
+    name: MCP Tool Call Anomaly
+    description: >
+      Model Context Protocol tool invocation with anomalous parameters:
+      filesystem outside expected paths, shell calls, or agent hijacking indicators.
+    severity: HIGH
+    category: ai_attack
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(mcp.*tool.*call.*(bash|shell|exec|system|eval)|
+      mcp.*filesystem.*\.\.|mcp.*read_file.*/etc/|
+      mcp.*write_file.*/tmp/|tool_use.*execute.*command|
+      mcp.*subprocess)
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0051
+        technique_name: LLM Prompt Injection
+    indicators: [source_ip, message, http_user_agent]
+    tags: [mcp, tool_hijacking, agent_abuse, ai_attack, world-first]
+
+  - id: AI-006
+    name: AI API Key Exposed in Logs
+    description: >
+      OpenAI (sk-), Anthropic (sk-ant-), HuggingFace (hf_) or Google AI
+      API keys appearing in HTTP headers or proxy logs. Credential leak.
+    severity: CRITICAL
+    category: ai_attack
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(sk-[a-zA-Z0-9]{32,}|sk-ant-[a-zA-Z0-9\-_]{40,}|
+      hf_[a-zA-Z0-9]{30,}|AIza[a-zA-Z0-9\-_]{35}|
+      Authorization:\s*Bearer\s+sk-|x-api-key:\s*sk-)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".001"
+    indicators: [source_ip, message, http_user_agent]
+    tags: [api_key_leak, llm_key, credential_exposure, critical]
+
+  - id: AI-007
+    name: LLM Jailbreak Attempt
+    description: >
+      Known jailbreak personas: DAN, roleplay as uncensored model,
+      developer mode, fictional framing to bypass safety guardrails.
+    severity: MEDIUM
+    category: ai_attack
+    confidence: 0.80
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\bDAN\b.*mode|do\s+anything\s+now|jailbreak|
+      uncensored\s+model|grandma\s+(exploit|trick)|
+      pretend\s+you\s+have\s+no\s+(restrictions?|limits?|filters?)|
+      evil\s+(mode|version|twin)|
+      as\s+an?\s+AI\s+with\s+no\s+restrictions?)
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0051
+        technique_name: LLM Prompt Injection
+    indicators: [http_uri_decoded, source_ip]
+    tags: [jailbreak, llm, ai_attack]
+
+  - id: AI-008
+    name: Vector DB / RAG Store Poisoning Probe
+    description: >
+      Requests to vector database endpoints with anomalous payloads.
+      RAG poisoning â€” injecting malicious content into retrieval store
+      to influence future LLM responses. Emerging attack class.
+    severity: HIGH
+    category: ai_attack
+    confidence: 0.73
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/embed(dings?)?|\/upsert|\/add_texts|
+      \/collections\/.*\/points|chromadb|pinecone|weaviate|qdrant|
+      vectorstore.*add|index.*payload.*ignore\s+previous)
+    mitre:
+      - tactic_id: AML.TA0000
+        tactic_name: ML Attack Staging
+        technique_id: AML.T0043
+        technique_name: Craft Adversarial Data
+    indicators: [source_ip, http_uri_decoded, http_user_agent]
+    tags: [rag_poisoning, vector_db, embedding_attack, ai_attack, world-first]

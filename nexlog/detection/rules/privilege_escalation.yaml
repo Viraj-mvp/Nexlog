@@ -1,0 +1,265 @@
+﻿# detection/rules/privilege_escalation.yaml â€” NexLog v2
+# 9 rules â€” privilege escalation: token manipulation, UAC bypass,
+#           kernel exploits, sudo abuse, named pipe impersonation
+# Log sources: Windows Event (4624/4672/4688), Sysmon, auth.log, audit.log
+#
+# Gap this fills: T1134 (token manipulation), T1068 (exploit for priv esc),
+# T1548 (abuse elevation control), T1055 (process injection for priv esc)
+# These are distinct from lateral_movement.yaml which covers post-priv-esc pivoting.
+
+rules:
+
+  - id: PRIV-001
+    name: Windows Token Impersonation / Theft (T1134)
+    description: >
+      Process creating a token from another user context or impersonating
+      a privileged token. Sysmon/4688 showing SeImpersonatePrivilege,
+      SeAssignPrimaryTokenPrivilege, or token manipulation APIs.
+      JuicyPotato, PrintSpoofer, RoguePotato all leave this signature.
+    severity: CRITICAL
+    category: privilege_escalation
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(SeImpersonatePrivilege|SeAssignPrimaryTokenPrivilege|
+      SeCreateTokenPrivilege|SeTcbPrivilege|
+      ImpersonateNamedPipeClient|DuplicateTokenEx|
+      CreateProcessWithTokenW|SetThreadToken|
+      JuicyPotato|PrintSpoofer|RoguePotato|
+      SweetPotato|RottenPotato|
+      token\s+impersonat|privilege\s+escalat.*token)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1134
+        technique_name: Access Token Manipulation
+    indicators: [hostname, username, message, process_name]
+    tags: [token_impersonation, privilege_escalation, windows, interview-testable]
+
+  - id: PRIV-002
+    name: UAC Bypass Technique
+    description: >
+      Known UAC (User Account Control) bypass patterns: fodhelper, eventvwr,
+      sdclt, cmstp, or registry hijacking of auto-elevated binaries.
+      These techniques execute code at high integrity without a UAC prompt.
+    severity: CRITICAL
+    category: privilege_escalation
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(fodhelper\.exe.*\\\S+\.exe|
+      eventvwr\.exe.*\\\S+\.exe|
+      sdclt\.exe.*\/kickoffelev|
+      cmstp\.exe.*\/s|
+      HKCU\\Software\\Classes\\ms-settings|
+      HKCU\\Software\\Classes\\mscfile|
+      HKCU.*Shell\\Open\\command.*cmd|
+      UACMe|bypassuac|uacbypass|
+      Bypass.*UAC.*registry|
+      DiskCleanup.*elevation)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1548
+        technique_name: Abuse Elevation Control Mechanism
+        sub_technique: ".002"
+    indicators: [hostname, username, message]
+    tags: [uac_bypass, privilege_escalation, windows, interview-testable]
+
+  - id: PRIV-003
+    name: Sudo Privilege Escalation (Linux)
+    description: >
+      sudo -l (list allowed commands) followed by execution of a binary
+      known to allow privilege escalation (GTFOBins). Common pattern:
+      attacker checks sudo rights then abuses find, vim, python, etc.
+    severity: CRITICAL
+    category: privilege_escalation
+    confidence: 0.85
+    type: sequence
+    steps:
+      - match_field: message
+        value_contains: sudo -l
+      - match_field: message
+        value_contains: sudo
+    group_by: source_ip
+    window_secs: 120
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1548
+        technique_name: Abuse Elevation Control Mechanism
+        sub_technique: ".003"
+    indicators: [source_ip, username, hostname, message]
+    tags: [sudo, gtfobins, linux, privilege_escalation, interview-testable]
+
+  - id: PRIV-004
+    name: SUID / SGID Binary Abuse (GTFOBins)
+    description: >
+      Execution of SUID-set binaries known to allow shell escape or
+      file read as root. GTFOBins list: find, bash, vim, python, perl,
+      cp, mv, nmap, awk, man, less, more, env, node.
+    severity: HIGH
+    category: privilege_escalation
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(find\s+.*-exec\s+\/bin\/(sh|bash)|
+      \/usr\/bin\/find.*-exec\s+sh|
+      python[23]?\s+-c\s+['"]import\s+os.*setuid|
+      perl\s+-e\s+['"]exec\s*['"]\/bin\/sh|
+      vim\s+.*-c\s+['"]!\/bin\/bash|
+      nmap\s+--interactive|
+      env\s+\/bin\/sh|env\s+\/bin\/bash|
+      (bash|sh)\s+-p\s+-i|
+      SUID.*escalat|
+      \/bin\/bash\s+-p)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1548
+        technique_name: Abuse Elevation Control Mechanism
+        sub_technique: ".001"
+    indicators: [source_ip, username, hostname, message]
+    tags: [suid, gtfobins, linux, privilege_escalation]
+
+  - id: PRIV-005
+    name: Kernel Exploit Attempt
+    description: >
+      Known kernel exploit tool names or CVE identifiers in process logs.
+      DirtyPipe (CVE-2022-0847), DirtyC0w, PwnKit (CVE-2021-4034),
+      OverlayFS exploits used for container and Linux priv esc.
+    severity: CRITICAL
+    category: privilege_escalation
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(dirtypipe|dirty_pipe|CVE-2022-0847|
+      dirtycow|dirty_cow|CVE-2016-5195|
+      pwnkit|CVE-2021-4034|pkexec\s+--|
+      overlayfs.*exploit|CVE-2021-3493|
+      CVE-2023-4911|looney_tunables|
+      CVE-2022-2586|CVE-2023-32629|
+      raptor_udf|exploit.*kernel.*root)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1068
+        technique_name: Exploitation for Privilege Escalation
+    indicators: [hostname, username, message]
+    tags: [kernel_exploit, cve, linux, privilege_escalation, critical]
+
+  - id: PRIV-006
+    name: Named Pipe Impersonation
+    description: >
+      Server-side named pipe created by low-priv process, waiting for a
+      high-priv process to connect, then impersonating its token.
+      Used by many C2 frameworks (Cobalt Strike, Metasploit) post-exploitation.
+    severity: HIGH
+    category: privilege_escalation
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(CreateNamedPipe.*\\pipe\\|
+      ImpersonateNamedPipe|
+      ConnectNamedPipe|
+      Sysmon.*EventID.*17|Sysmon.*EventID.*18|
+      pipe.*created.*SYSTEM|
+      named\s+pipe.*impersonat|
+      getsystem.*named.pipe|
+      meterpreter.*getsystem)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1134
+        technique_name: Access Token Manipulation
+        sub_technique: ".001"
+    indicators: [hostname, username, message, process_name]
+    tags: [named_pipe, impersonation, c2_framework, privilege_escalation]
+
+  - id: PRIV-007
+    name: Windows Service Binary Hijacking
+    description: >
+      Writable service binary path or unquoted service path exploitation.
+      Attacker replaces or plants binary that runs as SYSTEM when service starts.
+      EventID 7045 (new service) from non-admin user is always suspicious.
+    severity: HIGH
+    category: privilege_escalation
+    confidence: 0.83
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(EventID.*7045.*%TEMP%|
+      EventID.*7045.*%APPDATA%|
+      EventID.*7045.*C:\\\\Users|
+      sc\s+create.*binPath.*%|
+      unquoted.*service\s+path|
+      service.*binary.*writable|
+      icacls.*service.*Everyone.*F|
+      accesschk.*service.*write)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1574
+        technique_name: Hijack Execution Flow
+        sub_technique: ".010"
+    indicators: [hostname, username, message]
+    tags: [service_hijack, unquoted_path, windows, privilege_escalation]
+
+  - id: PRIV-008
+    name: DLL Hijacking / Search Order Abuse
+    description: >
+      DLL placed in application directory that shadows a system DLL.
+      Sysmon EID 7 showing unsigned DLL loaded from user-writable path
+      by a privileged process.
+    severity: HIGH
+    category: privilege_escalation
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Sysmon.*EventID.*7.*Unsigned|
+      ImageLoaded.*C:\\\\Users.*\.dll|
+      ImageLoaded.*%TEMP%.*\.dll|
+      DLL.*loaded.*from.*writable|
+      unsigned.*DLL.*system32|
+      dll.*hijack|dll.*search.*order|
+      phantom\s+dll|
+      ImageLoaded.*AppData.*\.dll)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1574
+        technique_name: Hijack Execution Flow
+        sub_technique: ".001"
+    indicators: [hostname, username, message, process_name]
+    tags: [dll_hijacking, search_order, privilege_escalation, windows]
+
+  - id: PRIV-009
+    name: Polkit / PwnKit Local Privilege Escalation
+    description: >
+      pkexec executed with no arguments or with exploit-indicative arguments.
+      CVE-2021-4034 (PwnKit) executes arbitrary code as root via pkexec.
+      Any pkexec execution outside of legitimate admin workflows is suspicious.
+    severity: CRITICAL
+    category: privilege_escalation
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(pkexec\s*$|pkexec\s+--disable-internal-agent|
+      polkit.*exploit|CVE-2021-4034|
+      pkexec.*argc.*0|
+      polkit\s+authentication\s+failed.*root|
+      pwnkit|pkexec.*environment.*GCONV_PATH)
+    mitre:
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1068
+        technique_name: Exploitation for Privilege Escalation
+    indicators: [hostname, username, message]
+    tags: [pkexec, pwnkit, polkit, linux, privilege_escalation, cve]

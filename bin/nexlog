@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# NexLog CLI wrapper for Kali Linux / macOS / Unix systems
+# Locates the repository root and runs main.py
+
+# Resolve the absolute path of the directory containing this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Execute main.py passing all arguments
+python3 "$REPO_ROOT/main.py" "$@"

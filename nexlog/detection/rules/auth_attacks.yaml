@@ -1,0 +1,246 @@
+﻿# detection/rules/auth_attacks.yaml  â€” NexLog v2
+# 10 rules â€” brute force, token forgery, session attacks, identity abuse
+
+rules:
+
+  - id: AUTH-001
+    name: SSH Brute Force
+    description: >
+      5+ failed SSH logins from single IP within 60 seconds.
+      Classic password brute force or credential spray.
+    severity: HIGH
+    category: auth
+    confidence: 0.90
+    type: threshold
+    group_by: source_ip
+    count: 5
+    window_secs: 60
+    filter:
+      auth_result: failure
+      process_name_contains: sshd
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+        sub_technique: ".001"
+    indicators: [source_ip, username]
+    tags: [brute_force, ssh]
+
+  - id: AUTH-002
+    name: SSH Root Compromise
+    description: >
+      Successful SSH root login following failed attempts from same IP.
+      The most dangerous 4-line sequence in any Linux log.
+    severity: CRITICAL
+    category: auth
+    confidence: 0.95
+    type: sequence
+    steps:
+      - match_field: auth_result
+        value: failure
+        match_field2: username
+        value2: root
+        min_count: 1
+      - match_field: auth_result
+        value: success
+        match_field2: username
+        value2: root
+        must_follow: true
+        window_secs: 300
+    group_by: source_ip
+    window_secs: 300
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1078
+        technique_name: Valid Accounts
+        sub_technique: ".003"
+      - tactic_id: TA0004
+        tactic_name: Privilege Escalation
+        technique_id: T1078
+        technique_name: Valid Accounts
+    indicators: [source_ip, username]
+    tags: [root_compromise, critical]
+
+  - id: AUTH-003
+    name: Web Login Brute Force
+    description: >
+      10+ HTTP 401/403 responses to same source IP within 60 seconds.
+      Credential stuffing or web form brute force.
+    severity: HIGH
+    category: auth
+    confidence: 0.85
+    type: threshold
+    group_by: source_ip
+    count: 10
+    window_secs: 60
+    filter:
+      http_status_in: [401, 403]
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+        sub_technique: ".004"
+    indicators: [source_ip, http_uri, username]
+    tags: [brute_force, web]
+
+  - id: AUTH-004
+    name: Windows Failed Logon Spike (4625)
+    description: >
+      5+ Event ID 4625 from same source within 2 minutes.
+      Could be pass-the-hash probe, password spray, or RDP brute force.
+    severity: HIGH
+    category: auth
+    confidence: 0.88
+    type: threshold
+    group_by: source_ip
+    count: 5
+    window_secs: 120
+    filter:
+      event_id: "4625"
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+        sub_technique: ".003"
+    indicators: [source_ip, username]
+    tags: [brute_force, windows, evtx]
+
+  - id: AUTH-005
+    name: Internal IP Authentication Failure
+    description: >
+      Auth failure from RFC1918 private IP. Possible lateral movement,
+      insider threat, or compromised internal host.
+    severity: MEDIUM
+    category: auth
+    confidence: 0.70
+    type: regex
+    match_field: source_ip
+    pattern: >-
+      ^(10\.\d+\.\d+\.\d+|
+      172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|
+      192\.168\.\d+\.\d+)$
+    filter:
+      auth_result: failure
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+    indicators: [source_ip, username]
+    tags: [internal, lateral_movement]
+
+  - id: AUTH-006
+    name: Audit Log Cleared (1102)
+    description: >
+      Windows Security Event Log cleared. Strongest indicator of
+      attacker covering tracks. Always CRITICAL.
+    severity: CRITICAL
+    category: auth
+    confidence: 0.99
+    type: regex
+    match_field: event_id
+    pattern: '^1102$'
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1070
+        technique_name: Indicator Removal
+        sub_technique: ".001"
+    indicators: [hostname, username, timestamp]
+    tags: [log_cleared, defense_evasion, critical]
+
+  - id: AUTH-007
+    name: JWT Algorithm Downgrade (alg:none)
+    description: >
+      JWT header contains alg=none or alg=HS256 with empty signature.
+      Attacker forging tokens by bypassing signature verification.
+    severity: CRITICAL
+    category: auth
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(eyJ[a-zA-Z0-9_-]*\.(eyJ[a-zA-Z0-9_-]*)\.\s*$|
+      "alg"\s*:\s*"none"|"alg"\s*:\s*"None"|
+      alg=none|algorithm.*none|
+      eyJhbGciOiJub25lIi)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1550
+        technique_name: Use Alternate Authentication Material
+        sub_technique: ".004"
+    indicators: [source_ip, http_user_agent, message]
+    tags: [jwt, token_forgery, owasp-api-2, portfolio-worthy]
+
+  - id: AUTH-008
+    name: OAuth / Token Endpoint Abuse
+    description: >
+      High rate of requests to OAuth token endpoints from single IP.
+      Could be client_credentials brute force or token stuffing.
+    severity: HIGH
+    category: auth
+    confidence: 0.80
+    type: threshold
+    group_by: source_ip
+    count: 15
+    window_secs: 60
+    filter:
+      http_status_in: [400, 401, 403]
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+    indicators: [source_ip, http_uri]
+    tags: [oauth, token_abuse, api_auth]
+
+  - id: AUTH-009
+    name: Credential Stuffing Pattern
+    description: >
+      Multiple different usernames attempted from single IP in short window.
+      Distinguishes stuffing (many users) from brute force (one user).
+    severity: HIGH
+    category: auth
+    confidence: 0.82
+    type: threshold
+    group_by: source_ip
+    count: 8
+    window_secs: 120
+    count_distinct: username
+    filter:
+      auth_result: failure
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+        sub_technique: ".004"
+    indicators: [source_ip, username]
+    tags: [credential_stuffing, owasp-api-4]
+
+  - id: AUTH-010
+    name: MFA / OTP Brute Force
+    description: >
+      Repeated requests to MFA verification endpoints. Attacker attempting
+      to brute-force a 6-digit TOTP code (1,000,000 possibilities).
+    severity: HIGH
+    category: auth
+    confidence: 0.83
+    type: threshold
+    group_by: source_ip
+    count: 10
+    window_secs: 60
+    filter:
+      http_status_in: [400, 401, 403]
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1110
+        technique_name: Brute Force
+    indicators: [source_ip, http_uri]
+    tags: [mfa_bypass, otp_brute, account_takeover]

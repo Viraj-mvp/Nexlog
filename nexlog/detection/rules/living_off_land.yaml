@@ -1,0 +1,219 @@
+﻿# detection/rules/living_off_land.yaml  â€” NexLog v2
+# 5 rules â€” LOLBin (Living Off the Land Binary) abuse
+# Windows built-in tools repurposed by attackers.
+# Log source: Windows Security 4688 / Sysmon EID 1
+
+rules:
+
+  - id: LOL-001
+    name: CertUtil Malicious File Download
+    description: >
+      certutil.exe invoked with -urlcache, -split, or -f flags â€”
+      classic technique for downloading payloads while bypassing AV.
+      EventID 4688 or Sysmon 1 with certutil.exe command line.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(certutil(\.exe)?\s+.*((-|\/)urlcache|(-|\/)split|(-|\/)f|(-|\/)decode)|
+      certutil.*https?://|certutil.*ftp://)
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1105
+        technique_name: Ingress Tool Transfer
+    indicators: [hostname, username, message]
+    tags: [certutil, lolbin, download, interview-testable, cert-mapped-splunk]
+
+  - id: LOL-002
+    name: MSHTA Remote Script Execution
+    description: >
+      mshta.exe executing a remote HTA file or JavaScript via http/https.
+      Used to bypass application whitelisting and execute remote scripts.
+    severity: CRITICAL
+    category: lolbin
+    confidence: 0.93
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(mshta(\.exe)?\s+.*(https?://|ftp://|\\\\)|
+      mshta.*vbscript:|mshta.*javascript:|
+      mshta.*\.hta)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1218
+        technique_name: System Binary Proxy Execution
+        sub_technique: ".005"
+    indicators: [hostname, username, message]
+    tags: [mshta, lolbin, applocker_bypass, interview-testable]
+
+  - id: LOL-003
+    name: Regsvr32 Squiblydoo Bypass
+    description: >
+      regsvr32.exe with /s /n /i: flags executing remote SCT file.
+      "Squiblydoo" technique bypasses AppLocker and whitelisting.
+    severity: CRITICAL
+    category: lolbin
+    confidence: 0.93
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(regsvr32(\.exe)?\s+.*(\/s\s+\/n\s+\/i:|\/i:https?://|
+      \/i:\\\\|\s+scrobj\.dll)|
+      regsvr32.*\.sct)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1218
+        technique_name: System Binary Proxy Execution
+        sub_technique: ".010"
+    indicators: [hostname, username, message]
+    tags: [regsvr32, squiblydoo, lolbin, applocker_bypass]
+
+  - id: LOL-004
+    name: BITSAdmin Malicious Transfer
+    description: >
+      bitsadmin.exe creating jobs to download from external URLs.
+      BITS transfers survive reboots and bypass many network controls.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(bitsadmin(\.exe)?\s+.*(\/transfer|\/create|\/addfile|\/resume)|
+      bitsadmin.*https?://|bitsadmin.*/priority\s+high)
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1197
+        technique_name: BITS Jobs
+    indicators: [hostname, username, message]
+    tags: [bitsadmin, bits, lolbin, persistence_download]
+
+  - id: LOL-005
+    name: WScript / CScript Remote Execution
+    description: >
+      wscript.exe or cscript.exe executing scripts from network shares,
+      temp directories, or with downloaded payloads.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.87
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((wscript|cscript)(\.exe)?\s+.*(\\\\|https?://|ftp://|
+      %temp%|%appdata%|/tmp/|C:\\Users\\.*\\AppData)|
+      (wscript|cscript).*\.vbs.*http|
+      (wscript|cscript).*\.js.*http)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1059
+        technique_name: Command and Scripting Interpreter
+        sub_technique: ".005"
+    indicators: [hostname, username, message]
+    tags: [wscript, cscript, vbscript, lolbin, cert-mapped-splunk]
+
+  - id: LOL-006
+    name: Rundll32 Malicious DLL Execution
+    description: >
+      rundll32.exe executing DLLs from unusual paths or with suspicious
+      export names. Used to run malicious DLLs while bypassing AppLocker.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.87
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(rundll32(\\.exe)?\\s+.*(javascript:|\\\\\\\\|https?://|
+      %temp%|%appdata%|C:\\\\Users\\\\.*AppData\\\\Local\\\\Temp|
+      advpack\\.dll.*LaunchINFSection|
+      ieadvpack\\.dll.*LaunchINFSection|
+      setupapi\\.dll.*InstallHinfSection|
+      shell32\\.dll.*Control_RunDLL)|
+      rundll32.*\\.dll,DllInstall)
+    mitre:
+      - tactic_id: TA0005
+        tactic_name: Defense Evasion
+        technique_id: T1218
+        technique_name: System Binary Proxy Execution
+        sub_technique: ".011"
+    indicators: [hostname, username, message]
+    tags: [rundll32, lolbin, dll_proxy, applocker_bypass, interview-testable]
+
+  - id: LOL-007
+    name: MSBuild / CSC Inline Code Execution
+    description: >
+      MSBuild.exe or csc.exe compiling and executing code inline from
+      XML project file. Bypasses AppLocker by leveraging trusted build tools.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(msbuild(\\.exe)?\\s+.*\\.xml|msbuild(\\.exe)?\\s+.*\\.csproj|
+      msbuild.*\\\\temp\\\\|msbuild.*inline.*task|
+      csc(\\.exe)?\\s+.*\\/out:.*\\\\temp|
+      msbuild.*TaskFactory.*RoslynCodeTaskFactory|
+      MSBuildShell|msbuild.*exec.*download)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1127
+        technique_name: Trusted Developer Utilities Proxy Execution
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [msbuild, csc, lolbin, code_execution, applocker_bypass]
+
+  - id: LOL-008
+    name: InstallUtil Bypass
+    description: >
+      InstallUtil.exe executing arbitrary .NET code via /logfile= /u flags.
+      Classic AppLocker whitelisting bypass using trusted .NET utility.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(installutil(\\.exe)?\\s+.*(\\/logfile=|\\/logtoconsole=false|
+      \\/u\\s+|\\/uninstall\\s+)|
+      InstallUtil.*payload|installutil.*(temp|appdata|programdata))
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1218
+        technique_name: System Binary Proxy Execution
+        sub_technique: ".004"
+    indicators: [hostname, username, message]
+    tags: [installutil, lolbin, dotnet_bypass, applocker_bypass]
+
+  - id: LOL-009
+    name: WMIC Remote Command Execution
+    description: >
+      wmic.exe /node: executing commands on remote hosts. Legitimate
+      admin tool heavily abused for lateral movement and remote execution.
+    severity: HIGH
+    category: lolbin
+    confidence: 0.87
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(wmic(\\.exe)?\\s+.*\\/node:\\s*[0-9]|
+      wmic.*\\/node:.*process\\s+call\\s+create|
+      wmic.*\\/node:.*os\\s+get|
+      wmic.*xsl.*http|
+      wmic.*process.*call.*create.*cmd|
+      wmic.*process.*call.*create.*powershell)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+    indicators: [hostname, username, message]
+    tags: [wmic, lolbin, remote_execution, lateral_movement]

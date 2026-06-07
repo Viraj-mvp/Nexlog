@@ -1,0 +1,159 @@
+﻿# detection/rules/persistence.yaml  â€” NexLog v2
+# 7 rules â€” OS-level and web-level persistence mechanisms
+
+rules:
+
+  - id: PERS-001
+    name: Suspicious Script Extension Upload
+    description: >
+      HTTP POST to upload path with server-side executable extension.
+      Covers PHP, ASP, JSP and obfuscated variants.
+    severity: CRITICAL
+    category: persistence
+    confidence: 0.87
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(upload|files|media|static|assets|images|docs|temp|tmp|backup)
+      .*\.(php[3-8]?|phtml|php\.jpg|asp|aspx|asmx|ashx|
+      jsp|jspx|cfm|cfml|pl|py|rb|cgi|shtml)$
+    filter:
+      http_method: POST
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1505
+        technique_name: Server Software Component
+        sub_technique: ".003"
+    indicators: [http_uri_decoded, source_ip, http_method]
+    tags: [webshell_upload, persistence]
+
+  - id: PERS-002
+    name: Windows Scheduled Task Created (4698)
+    description: >
+      EventID 4698 â€” new scheduled task registered.
+      Primary mechanism for malware persistence on Windows.
+    severity: HIGH
+    category: persistence
+    confidence: 0.80
+    type: regex
+    match_field: event_id
+    pattern: '^4698$'
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1053
+        technique_name: Scheduled Task/Job
+        sub_technique: ".005"
+    indicators: [username, hostname]
+    tags: [scheduled_task, persistence, windows]
+
+  - id: PERS-003
+    name: New Windows User Account (4720)
+    description: >
+      EventID 4720 â€” local user created. Attackers create
+      backdoor accounts to maintain persistent access.
+    severity: HIGH
+    category: persistence
+    confidence: 0.85
+    type: regex
+    match_field: event_id
+    pattern: '^4720$'
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1136
+        technique_name: Create Account
+        sub_technique: ".001"
+    indicators: [username, hostname]
+    tags: [new_account, persistence, windows]
+
+  - id: PERS-004
+    name: WMI Event Subscription (Sysmon 19/20/21)
+    description: >
+      Sysmon EventIDs 19, 20, 21 â€” WMI filter, consumer, or binding created.
+      WMI subscriptions survive reboots and are hard to detect without Sysmon.
+    severity: CRITICAL
+    category: persistence
+    confidence: 0.90
+    type: regex
+    match_field: event_id
+    pattern: '^(19|20|21)$'
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1546
+        technique_name: Event Triggered Execution
+        sub_technique: ".003"
+    indicators: [hostname, username]
+    tags: [wmi, persistence, interview-testable, cert-mapped-ejpt]
+
+  - id: PERS-005
+    name: WMI Consumer Type â€” Script/CommandLine Execution
+    description: >
+      ActiveScriptEventConsumer or CommandLineEventConsumer in WMI event data.
+      These types execute arbitrary scripts/commands on trigger events.
+    severity: CRITICAL
+    category: persistence
+    confidence: 0.93
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(ActiveScriptEventConsumer|CommandLineEventConsumer|
+      root\\subscription|__EventFilter|__EventConsumer|
+      __FilterToConsumerBinding|WQL.*SELECT.*__InstanceCreationEvent)
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1546
+        technique_name: Event Triggered Execution
+        sub_technique: ".003"
+    indicators: [hostname, message]
+    tags: [wmi, persistence, interview-testable]
+
+  - id: PERS-006
+    name: Linux Cron Backdoor
+    description: >
+      New crontab entry referencing download tools, /tmp, or /dev/shm.
+      Common dropper persistence mechanism on Linux servers.
+    severity: HIGH
+    category: persistence
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(crontab|/etc/cron\.(d|daily|hourly|weekly|monthly)|
+      /var/spool/cron).*(wget|curl|bash|sh|python|perl|
+      /tmp/|/dev/shm/|/var/tmp/)
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1053
+        technique_name: Scheduled Task/Job
+        sub_technique: ".003"
+    indicators: [hostname, username, message]
+    tags: [cron, persistence, linux]
+
+  - id: PERS-007
+    name: Windows Registry Run Key Modification
+    description: >
+      Process creation or registry event touching autorun keys
+      HKLM/HKCU Run or RunOnce. Classic persistence location.
+    severity: HIGH
+    category: persistence
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run|
+      HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run|
+      CurrentVersion\\RunOnce|CurrentVersion\\RunServices|
+      reg\s+add.*\\Run|New-ItemProperty.*Run)
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1547
+        technique_name: Boot or Logon Autostart Execution
+        sub_technique: ".001"
+    indicators: [hostname, username, message]
+    tags: [registry, run_key, persistence, windows]

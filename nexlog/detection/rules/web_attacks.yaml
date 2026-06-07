@@ -1,0 +1,302 @@
+﻿# detection/rules/web_attacks.yaml  â€” NexLog v2
+# 13 rules covering OWASP Top 10 2021 + API Security Top 10 + modern vectors
+
+rules:
+
+  - id: WEB-001
+    name: SQL Injection Attempt
+    description: >
+      SQL injection in URI â€” union-based, boolean-blind, time-based, stacked,
+      and error-based variants. Includes load_file and into outfile.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.85
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)('\s*(or|and)\s*'?\d|\bunion\b.{0,30}\bselect\b|--\s*$|
+      ;\s*(drop|truncate|delete|insert|update)\s+\b|\bexec\s*\(|
+      xp_cmdshell|0x[0-9a-f]{4,}|char\s*\(\s*\d+|
+      \bwaitfor\s+delay\b|\bsleep\s*\(\s*\d|\bload_file\s*\(|
+      \binto\s+outfile\b|\binformation_schema\b|\bgroup_concat\s*\()
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [http_uri_decoded, source_ip, http_user_agent]
+    tags: [sqli, owasp-a03, injection]
+
+  - id: WEB-002
+    name: Cross-Site Scripting (XSS)
+    description: >
+      XSS payloads â€” reflected, stored, and DOM-based. Covers script tags,
+      event handlers, javascript: URIs and eval-based sinks.
+    severity: MEDIUM
+    category: web_attack
+    confidence: 0.80
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(<\s*script[\s>]|javascript\s*:|
+      on(error|load|click|mouse\w+|key\w+|focus|blur|submit)\s*=|
+      <\s*(img|svg|body|input|iframe|embed|object|video|audio)[^>]+\s+on\w+\s*=|
+      alert\s*\(|document\s*\.\s*(cookie|location|write)|\beval\s*\(|
+      String\s*\.\s*fromCharCode|expression\s*\()
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1059
+        technique_name: Command and Scripting Interpreter
+        sub_technique: ".007"
+    indicators: [http_uri_decoded, source_ip]
+    tags: [xss, owasp-a03]
+
+  - id: WEB-003
+    name: Directory / Path Traversal
+    description: >
+      Path traversal sequences targeting /etc/passwd, /proc/self,
+      Windows system paths, and SSH keys.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.90
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\.\./|\.\.\\|%2e%2e%2f|%2e%2e/|\.\.%2f|%252e%252e|\.\.%5c|
+      /etc/(passwd|shadow|hosts|crontab|sudoers)|/proc/self|
+      /root/\.ssh|/home/\w+/\.ssh|\\windows\\system32|
+      \.\.[\\/]{1,3}(etc|proc|windows|boot|var|usr))
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1083
+        technique_name: File and Directory Discovery
+    indicators: [http_uri_decoded, source_ip]
+    tags: [traversal, lfi, owasp-a01]
+
+  - id: WEB-004
+    name: Local / Remote File Inclusion
+    description: >
+      LFI/RFI via PHP wrappers, protocol handlers, and log poisoning vectors.
+    severity: CRITICAL
+    category: web_attack
+    confidence: 0.85
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)((file|php|zip|data|expect|input|glob|phar)\s*://|
+      =https?://[^/]+/|=ftp://|php://filter|php://input|
+      /var/log/(nginx|apache2?|access|error)|/proc/self/(environ|fd))
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [http_uri_decoded, source_ip]
+    tags: [lfi, rfi, owasp-a03]
+
+  - id: WEB-005
+    name: OS Command Injection
+    description: >
+      Shell metacharacters in URI indicating OS command injection.
+      Includes subshell, pipe-to-shell, and background execution patterns.
+    severity: CRITICAL
+    category: web_attack
+    confidence: 0.88
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)([;&|`]\s*(ls|cat|id|whoami|uname|wget|curl|bash|sh|python[23]?|
+      perl|ruby|nc|ncat|nmap|ping)\b|\$\([^)]{0,80}\)|`[^`]{0,80}`|
+      \|\s*(bash|sh|cmd)|>\s*/dev/null|/bin/(sh|bash|dash)|
+      cmd\.exe|powershell|&&\s*(wget|curl|bash))
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1059
+        technique_name: Command and Scripting Interpreter
+    indicators: [http_uri_decoded, source_ip]
+    tags: [cmdi, rce, owasp-a03]
+
+  - id: WEB-006
+    name: Known Attack Tool User-Agent
+    description: >
+      HTTP request with fingerprinted scanner / attack tool in User-Agent.
+      High confidence automated malicious activity.
+    severity: MEDIUM
+    category: recon
+    confidence: 0.95
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)(sqlmap|nikto|nessus|openvas|masscan|nmap|zgrab|nuclei|
+      dirbuster|gobuster|feroxbuster|ffuf|hydra|medusa|burpsuite|
+      metasploit|python-requests/[12]\.|go-http-client/1\.|
+      curl/[0-6]\.|libwww-perl|w3af|acunetix|appscan|
+      arachni|wapiti|skipfish|vega\b|owasp\s*zap)
+    mitre:
+      - tactic_id: TA0043
+        tactic_name: Reconnaissance
+        technique_id: T1595
+        technique_name: Active Scanning
+    indicators: [http_user_agent, source_ip]
+    tags: [scanner, recon]
+
+  - id: WEB-007
+    name: Server-Side Request Forgery (SSRF)
+    description: >
+      SSRF vectors targeting cloud metadata endpoints, internal services,
+      and alternative protocol handlers.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.82
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(=https?://(127\.|10\.|192\.168\.|
+      172\.(1[6-9]|2\d|3[01])\.|169\.254\.|localhost|0\.0\.0\.0)|
+      =https?://\[::1\]|metadata\.google\.internal|
+      169\.254\.169\.254|instance-data|=file://|=gopher://|=dict://|=sftp://)
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1526
+        technique_name: Cloud Service Discovery
+    indicators: [http_uri_decoded, source_ip]
+    tags: [ssrf, owasp-a10]
+
+  - id: WEB-008
+    name: Webshell Access Pattern
+    description: >
+      Request to webshell filenames or command-passing parameters.
+      Covers popular public webshells including c99, r57, b374k, antsword.
+    severity: CRITICAL
+    category: persistence
+    confidence: 0.82
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)((cmd|exec|command|shell|run|system|passthru|eval)\s*=|
+      \.php\?(cmd|c|execute|run|act)=|
+      /(shell|cmd|c99|r57|b374k|wso|antsword|cknife|godzilla|behinder)
+      \.(php|asp|aspx|jsp)|/uploads/.*\.(php[3-8]?|phtml|asp|aspx|jsp))
+    mitre:
+      - tactic_id: TA0003
+        tactic_name: Persistence
+        technique_id: T1505
+        technique_name: Server Software Component
+        sub_technique: ".003"
+    indicators: [http_uri_decoded, source_ip, http_method]
+    tags: [webshell, persistence]
+
+  - id: WEB-009
+    name: Server-Side Template Injection (SSTI)
+    description: >
+      SSTI payloads targeting Jinja2, Twig, Freemarker, Velocity, Smarty.
+      Canary payloads like 7*7 and class introspection chains are reliable signals.
+    severity: CRITICAL
+    category: web_attack
+    confidence: 0.87
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\$\{7\*7\}|\{\{7\*7\}\}|\$\{.*\}|\{\{.*\}\}|
+      <%=.*%>|<#.*#>|\#\{.*\}|\{\{config\}\}|\{\{request\}\}|
+      \{\{''\.\_\_class\_\_\}\}|\{%.*import.*%\}|
+      \{\{.*\_\_import\_\_.*\}\}|
+      \#set\s*\(|\$\{.*getRuntime.*\})
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [http_uri_decoded, source_ip, http_status]
+    tags: [ssti, rce, owasp-a03, interview-testable]
+
+  - id: WEB-010
+    name: IDOR / BOLA Object Enumeration
+    description: >
+      Single source IP hitting same API path pattern at high rate.
+      Consistent with Broken Object Level Authorization enumeration.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.78
+    type: threshold
+    group_by: source_ip
+    count: 10
+    window_secs: 30
+    filter:
+      http_status_in: [200, 404]
+    mitre:
+      - tactic_id: TA0007
+        tactic_name: Discovery
+        technique_id: T1083
+        technique_name: File and Directory Discovery
+    indicators: [source_ip, http_uri]
+    tags: [idor, bola, owasp-api-1, interview-testable]
+
+  - id: WEB-011
+    name: XML External Entity (XXE) Injection
+    description: >
+      DOCTYPE declarations with SYSTEM/PUBLIC references in requests.
+      Allows reading local files or SSRF via XML parsers.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.88
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(<!DOCTYPE|<!ENTITY|SYSTEM\s+"|PUBLIC\s+"|
+      %xxe;|&xxe;|file:///etc|<!ENTITY\s+\w+\s+SYSTEM)
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [http_uri_decoded, source_ip]
+    tags: [xxe, owasp-a05]
+
+  - id: WEB-012
+    name: HTTP Request Smuggling Indicator
+    description: >
+      Conflicting Content-Length and Transfer-Encoding headers suggesting
+      HTTP desync / request smuggling probe.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.72
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Transfer-Encoding:\s*xchunked|
+      transfer-encoding:\s*(chunked|identity)\s.*content-length:|
+      content-length:\s*\d+\s.*transfer-encoding:)
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [source_ip, message]
+    tags: [http_smuggling, desync, advanced]
+
+  - id: WEB-013
+    name: Prototype Pollution
+    description: >
+      JavaScript prototype pollution via __proto__ or constructor.prototype
+      in query params. Can lead to RCE in Node.js applications.
+    severity: HIGH
+    category: web_attack
+    confidence: 0.82
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(__proto__|constructor\[prototype\]|constructor\.prototype|
+      \[__proto__\]|%5B__proto__%5D|__proto__\[|
+      constructor%5Bprototype%5D)
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1190
+        technique_name: Exploit Public-Facing Application
+    indicators: [http_uri_decoded, source_ip]
+    tags: [prototype_pollution, nodejs, owasp-a03]

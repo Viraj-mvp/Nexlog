@@ -1,0 +1,194 @@
+﻿# detection/rules/exfiltration.yaml  â€” NexLog v2
+# 5 rules â€” data exfiltration and C2 communication patterns
+
+rules:
+
+  - id: EXFIL-001
+    name: Unusually Large HTTP Response
+    description: >
+      HTTP response >= 5MB. May indicate bulk data exfiltration
+      via web application or API endpoint.
+    severity: MEDIUM
+    category: exfiltration
+    confidence: 0.65
+    type: regex
+    match_field: http_bytes
+    pattern: '^[5-9]\d{6,}$|^\d{8,}$'
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1041
+        technique_name: Exfiltration Over C2 Channel
+    indicators: [source_ip, http_uri, http_bytes]
+    tags: [exfil, large_response]
+
+  - id: EXFIL-002
+    name: Programmatic / Headless Client User-Agent
+    description: >
+      Generic programmatic UA (python, curl, go) to external IP.
+      May indicate automated exfiltration or C2 check-in.
+    severity: MEDIUM
+    category: exfiltration
+    confidence: 0.60
+    type: regex
+    match_field: http_user_agent
+    pattern: >-
+      (?i)^(python-urllib|python-httpx|python-requests|
+      curl/[0-9]|wget/[0-9]|go-http-client|-|
+      Java/[0-9]|Ruby|libcurl|PowerShell)
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1071
+        technique_name: Application Layer Protocol
+        sub_technique: ".001"
+    indicators: [source_ip, http_user_agent, http_uri]
+    tags: [c2_beacon, exfil]
+
+  - id: EXFIL-003
+    name: DNS Tunneling Indicator
+    description: >
+      Unusually long DNS query subdomain (>50 chars) or high rate of
+      DNS queries to a single domain. Common C2 / data exfil channel.
+    severity: HIGH
+    category: exfiltration
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(query:\s+[a-z0-9]{50,}\.|
+      NXDOMAIN.*[a-z0-9]{40,}\.|
+      DNS.*TXT.*[a-z0-9]{30,})
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1071
+        technique_name: Application Layer Protocol
+        sub_technique: ".004"
+    indicators: [source_ip, message]
+    tags: [dns_tunneling, c2, exfil]
+
+  - id: EXFIL-004
+    name: C2 Beaconing Pattern
+    description: >
+      Same IP making repeated outbound requests at suspiciously
+      regular intervals â€” hallmark of C2 beacon sleep jitter.
+    severity: HIGH
+    category: exfiltration
+    confidence: 0.70
+    type: threshold
+    group_by: source_ip
+    count: 10
+    window_secs: 600
+    filter:
+      http_status_in: [200]
+    mitre:
+      - tactic_id: TA0011
+        tactic_name: Command and Control
+        technique_id: T1071
+        technique_name: Application Layer Protocol
+    indicators: [source_ip, http_uri, http_user_agent]
+    tags: [c2_beacon, periodic, exfil]
+
+  - id: EXFIL-005
+    name: Staged Exfiltration â€” POST After Recon
+    description: >
+      Same IP that triggered a recon rule now making large HTTP POST.
+      Cross-rule correlation: recon followed by outbound data push.
+    severity: HIGH
+    category: exfiltration
+    confidence: 0.75
+    type: threshold
+    group_by: source_ip
+    count: 3
+    window_secs: 300
+    filter:
+      http_method: POST
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1048
+        technique_name: Exfiltration Over Alternative Protocol
+    indicators: [source_ip, http_uri, http_bytes]
+    tags: [staged_exfil, post_recon]
+
+  - id: EXFIL-006
+    name: Cloud Storage Exfiltration (S3 / GCS / Azure Blob)
+    description: >
+      PUT or POST requests to cloud object storage from internal network.
+      Attacker uploading stolen data to attacker-controlled cloud bucket.
+    severity: HIGH
+    category: exfiltration
+    confidence: 0.78
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\.s3\.amazonaws\.com.*(PUT|POST)|
+      storage\.googleapis\.com.*(PUT|POST)|
+      \.blob\.core\.windows\.net.*(PUT|POST)|
+      s3api\s+put-object|
+      gsutil\s+cp.*gs://|
+      az\s+storage\s+blob\s+upload)
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1567
+        technique_name: Exfiltration Over Web Service
+        sub_technique: ".002"
+    indicators: [source_ip, http_uri_decoded, http_bytes, http_method]
+    tags: [cloud_exfil, s3, gcs, azure_blob, exfil]
+
+  - id: EXFIL-007
+    name: Steganography Exfiltration Indicator
+    description: >
+      Image file upload unusually large for its type, or steganography
+      tool names in process logs. Data hidden inside image files for
+      covert exfiltration bypassing DLP controls.
+    severity: MEDIUM
+    category: exfiltration
+    confidence: 0.60
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(steghide\s+embed|outguess\s+-d|
+      stegsolve|stegosaurus|invisible\s+ink|
+      openstego|snow\s+-C|
+      exiftool.*-comment.*<payload|
+      jpg.*size.*[5-9]\d{6,}|
+      png.*size.*[3-9]\d{6,})
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1048
+        technique_name: Exfiltration Over Alternative Protocol
+    indicators: [source_ip, message, hostname]
+    tags: [steganography, covert_channel, exfil]
+
+  - id: EXFIL-008
+    name: Paste Site / Code Share Upload
+    description: >
+      POST requests to paste or code sharing sites carrying large payloads.
+      Attackers upload database dumps, config files, and credentials to
+      public paste sites â€” simultaneously exfiltrating and sharing.
+    severity: HIGH
+    category: exfiltration
+    confidence: 0.72
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(pastebin\.com\/(api|post)|
+      paste\.ee\/p\/|dpaste\.com\/|
+      ghostbin\.co\/|hastebin\.com\/|
+      gist\.github\.com\/|
+      controlc\.com\/|paste\.ofcode\.org\/|
+      privatebin\.net\/\?)
+    filter:
+      http_method: POST
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1567
+        technique_name: Exfiltration Over Web Service
+        sub_technique: ".003"
+    indicators: [source_ip, http_uri_decoded, http_bytes]
+    tags: [paste_site, code_share, exfil, data_leak]

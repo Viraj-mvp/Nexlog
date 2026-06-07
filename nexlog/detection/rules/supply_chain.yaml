@@ -1,0 +1,229 @@
+﻿# detection/rules/supply_chain.yaml â€” NexLog v2
+# 8 rules â€” software supply chain attacks
+# Log sources: npm/pip install logs, CI/CD pipeline logs, process creation (4688/Sysmon 1),
+#              proxy/firewall egress logs, web access logs
+#
+# Supply chain is the #1 fastest-growing attack vector in 2026.
+# SolarWinds, XZ utils, event-stream, node-ipc â€” all supply chain.
+# These rules detect the LOG SIGNATURES of supply chain compromise â€”
+# what appears in server logs when a malicious package executes.
+
+rules:
+
+  - id: SC-001
+    name: Dependency Confusion / Namespace Squatting Install
+    description: >
+      Package manager installing a package whose name matches an internal
+      private package but from the public registry â€” dependency confusion attack.
+      Signal: pip/npm install of suspiciously versioned package from
+      unexpected registry in process or proxy logs.
+    severity: HIGH
+    category: supply_chain
+    confidence: 0.78
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(npm\s+install.*--registry\s+https?://(?!registry\.npmjs\.org)|
+      pip\s+install.*-i\s+https?://(?!pypi\.org)|
+      pip\s+install.*--index-url\s+https?://(?!pypi\.org)|
+      gem\s+install.*--source\s+https?://(?!rubygems\.org)|
+      package.*installed.*from.*internal.*public|
+      dependency.*confusion|
+      Downloading\s+https?://(?!pypi\.org|files\.pythonhosted\.org|
+      registry\.npmjs\.org|dl\.google\.com)[^\s]+\.(whl|tar\.gz|tgz|zip))
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1195
+        technique_name: Supply Chain Compromise
+        sub_technique: ".001"
+    indicators: [hostname, message, process_name]
+    tags: [dependency_confusion, supply_chain, package_manager]
+
+  - id: SC-002
+    name: Malicious npm / PyPI Package Execution Pattern
+    description: >
+      Post-install script from a package manager spawning network tools,
+      shells, or file-system operations outside expected package dirs.
+      Malicious packages run code in install hooks (postinstall, setup.py).
+    severity: CRITICAL
+    category: supply_chain
+    confidence: 0.87
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((node|python[23]?|pip)\s+.*\|\s*(bash|sh|curl|wget)|
+      npm\s+install.*&&\s*(bash|sh|curl|wget|nc)|
+      postinstall.*curl.*\|\s*bash|
+      setup\.py.*install.*exec\s*\(|
+      node_modules\/\.bin\/.*\s+(curl|wget|nc)\s+|
+      site-packages\/.*subprocess.*shell.*True|
+      package.*install.*spawned.*(cmd|bash|sh|powershell))
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1195
+        technique_name: Supply Chain Compromise
+        sub_technique: ".002"
+    indicators: [hostname, message, process_name]
+    tags: [malicious_package, npm, pypi, supply_chain, critical]
+
+  - id: SC-003
+    name: CI/CD Pipeline Secret Exfiltration
+    description: >
+      Environment variable or secret file accessed and sent outbound
+      during a CI/CD pipeline run. Attacker injecting malicious step
+      to steal GITHUB_TOKEN, AWS creds, or deployment keys.
+    severity: CRITICAL
+    category: supply_chain
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((GITHUB_TOKEN|CI_JOB_TOKEN|CIRCLE_TOKEN|TRAVIS.*TOKEN|
+      AWS_SECRET|DOCKER_PASSWORD|NPM_TOKEN|PYPI_TOKEN|
+      DEPLOYMENT_KEY|SSH_PRIVATE_KEY)\s*=|
+      env\s*\|\s*(curl|wget|nc)\s+|
+      printenv.*\|\s*(curl|wget)|
+      secrets\.*\|\s*(curl|wget|base64)|
+      \.github\/workflows.*curl.*GITHUB_TOKEN|
+      pipeline.*secret.*exfil)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".001"
+    indicators: [hostname, message, source_ip]
+    tags: [cicd, secret_theft, github_actions, supply_chain, critical]
+
+  - id: SC-004
+    name: Typosquatted Package Name Pattern
+    description: >
+      Package name closely resembling a popular library with minor
+      character substitution (requests â†’ requets, urllib3 â†’ urlib3).
+      Regex catches common typosquatting character swaps in install logs.
+    severity: HIGH
+    category: supply_chain
+    confidence: 0.72
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Collecting\s+(requets|reqeusts|requsts|urllib4|urlib3|
+      boto|b0to3|botto3|djang0|flaskk|fastap1|
+      cryptograpy|pycrypto2|openssl2|
+      numpy2|nump1|panads|pnadas|
+      setup-tools|setuptool|
+      pip-tools2|requests-html2)(\s|==|>|$)|
+      installing\s+(requets|djang0|flaskk|urllib4|boto(?!3)))
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1195
+        technique_name: Supply Chain Compromise
+        sub_technique: ".001"
+    indicators: [hostname, message]
+    tags: [typosquatting, supply_chain, package_manager]
+
+  - id: SC-005
+    name: Git Repository Credential Leak
+    description: >
+      .git/config, .git-credentials, or .netrc accessed via web request
+      or process. Exposes repository credentials, tokens, and remote URLs.
+    severity: CRITICAL
+    category: supply_chain
+    confidence: 0.92
+    type: regex
+    match_field: http_uri_decoded
+    pattern: >-
+      (?i)(\/\.git\/(config|credentials|HEAD|FETCH_HEAD|packed-refs)|
+      \/\.git-credentials|\/\.netrc|
+      \/\.hg\/hgrc|\/\.svn\/auth\/|
+      \/\.bzr\/branch\/branch\.conf|
+      git\s+config\s+--global.*credential)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1552
+        technique_name: Unsecured Credentials
+        sub_technique: ".001"
+    indicators: [source_ip, http_uri_decoded]
+    tags: [git_leak, credential_exposure, supply_chain, recon]
+
+  - id: SC-006
+    name: GitHub Actions / Workflow Injection
+    description: >
+      Workflow file or Actions expression injection pattern in PR body,
+      issue title, or commit message that could execute arbitrary code
+      in CI context via ${{ }} expression evaluation.
+    severity: HIGH
+    category: supply_chain
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(\$\{\{\s*(github\.event\.(issue|pull_request|comment)\.
+      (body|title)|env\.|secrets\.)|
+      \$\{\{.*run:\s*|
+      actions\/checkout.*ref.*\$\{\{|
+      on:\s*pull_request_target.*uses:|
+      pwn_request|workflow.*injection)
+    mitre:
+      - tactic_id: TA0002
+        tactic_name: Execution
+        technique_id: T1059
+        technique_name: Command and Scripting Interpreter
+    indicators: [hostname, message]
+    tags: [github_actions, workflow_injection, cicd, supply_chain]
+
+  - id: SC-007
+    name: Docker Image from Untrusted / Unofficial Source
+    description: >
+      Container pulled from non-official registry or image name
+      pattern associated with cryptominers, RATs, or known malicious images.
+    severity: MEDIUM
+    category: supply_chain
+    confidence: 0.75
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(docker\s+pull\s+(?!docker\.io\/library\/|gcr\.io\/|
+      public\.ecr\.aws\/|mcr\.microsoft\.com\/|
+      registry\.k8s\.io\/)[^\s]+\/[^\s]+|
+      Pulling\s+from\s+[^\s]+\/xmrig|
+      Pulling\s+from\s+[^\s]+\/minerd|
+      image.*pulled.*from.*registry(?!\.k8s\.io|\.microsoft\.com|
+      \.docker\.com|gcr\.io|ecr\.aws))
+    mitre:
+      - tactic_id: TA0001
+        tactic_name: Initial Access
+        technique_id: T1195
+        technique_name: Supply Chain Compromise
+        sub_technique: ".003"
+    indicators: [hostname, message]
+    tags: [docker, untrusted_image, supply_chain, container]
+
+  - id: SC-008
+    name: Outbound Connection During Package Install
+    description: >
+      Network connection initiated during package installation to an
+      unexpected external host. Malicious packages exfiltrate host data
+      (hostname, username, env vars) on install via DNS or HTTPS callback.
+    severity: HIGH
+    category: supply_chain
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)((npm\s+install|pip\s+install|gem\s+install|go\s+get).*
+      (established|connected|CONNECT)\s+[0-9]{1,3}\.[0-9]{1,3}|
+      setup\.py.*urllib.*open|
+      postinstall.*curl\s+https?://[^\s]+\?|
+      install.*beacon|install.*callback\s+https?://)
+    mitre:
+      - tactic_id: TA0010
+        tactic_name: Exfiltration
+        technique_id: T1041
+        technique_name: Exfiltration Over C2 Channel
+    indicators: [source_ip, hostname, message]
+    tags: [malicious_package, install_callback, supply_chain, exfil]

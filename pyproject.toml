@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexlog"
+version = "1.0.0"
+description = "NexLog — Local-First DFIR Log Analyzer"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "NexLog Contributors"},
+]
+keywords = ["dfir", "forensics", "log-analysis", "siem", "security", "incident-response"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+]
+
+# ── Core CLI dependencies (lightweight, no GUI, no ML) ──────────────────
+dependencies = [
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.1",
+    "defusedxml>=0.7.1",
+    "ijson>=3.2.0",
+    "python-evtx>=0.7.4",
+    "reportlab>=4.0.0",
+    "networkx>=3.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+# pip install nexlog[web]    — adds the FastAPI web cockpit
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.7",
+]
+# pip install nexlog[gui]    — adds the PySide6 desktop GUI
+gui = [
+    "PySide6>=6.6.0",
+]
+# pip install nexlog[ai]     — adds local RAG / vector search / AI
+ai = [
+    "numpy>=1.26.0",
+    "scikit-learn>=1.4.0",
+    "sentence-transformers>=2.6.0",
+    "chromadb>=0.4.22",
+]
+# pip install nexlog[intel]  — adds threat intelligence enrichment
+intel = [
+    "maxminddb>=2.4.0",
+]
+# pip install nexlog[all]    — everything
+all = [
+    "nexlog[web,gui,ai,intel]",
+]
+# pip install nexlog[dev]    — development and testing
+dev = [
+    "pytest>=8.0.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nexlog/nexlog"
+Documentation = "https://github.com/nexlog/nexlog#readme"
+Repository = "https://github.com/nexlog/nexlog"
+Issues = "https://github.com/nexlog/nexlog/issues"
+
+# ── CLI entry points ────────────────────────────────────────────────────
+# After `pip install .`, these commands are available system-wide:
+#   nexlog           — main CLI analyzer
+#   nexlog-serve     — web cockpit server
+[project.scripts]
+nexlog = "main:main"
+nexlog-serve = "nexlog.interface.web.serve:_cli_main"
+
+[tool.setuptools]
+py-modules = ["main", "pathconfig", "conftest", "sitecustomize"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nexlog*"]
+
+[tool.setuptools.package-data]
+nexlog = [
+    "detection/rules/**/*.yml",
+    "detection/rules/**/*.yaml",
+    "interface/gui/**/*.qml",
+    "interface/gui/assets/*",
+    "interface/web/static/**/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

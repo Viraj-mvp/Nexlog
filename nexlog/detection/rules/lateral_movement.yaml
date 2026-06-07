@@ -1,0 +1,212 @@
+﻿# detection/rules/lateral_movement.yaml â€” NexLog v2
+# 8 rules â€” lateral movement, credential relay, remote service abuse
+# Log sources: Windows Event (4624/4648/4688), Sysmon, firewall, SSH
+
+rules:
+
+  - id: LAT-001
+    name: Pass-the-Hash / Overpass-the-Hash
+    description: >
+      Network logon (type 3) with NTLM authentication from non-standard source.
+      EventID 4624 with LogonType 3 and NTLM package â€” PtH indicator.
+      Combined with new source IP accessing sensitive hosts.
+    severity: CRITICAL
+    category: lateral_movement
+    confidence: 0.85
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(NTLM.*LogonType.*3|LogonType.*3.*NTLM|
+      AuthenticationPackageName.*NTLM.*Workstation|
+      NtLmSsp\s|NTLMSSP|
+      sekurlsa::pth|
+      Invoke-TheHash|CrackMapExec.*-H\s+[a-f0-9]{32})
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1550
+        technique_name: Use Alternate Authentication Material
+        sub_technique: ".002"
+    indicators: [source_ip, username, hostname, message]
+    tags: [pass_the_hash, ntlm, lateral_movement, critical]
+
+  - id: LAT-002
+    name: RDP Lateral Movement (EventID 4624 Type 10)
+    description: >
+      Windows logon type 10 (RemoteInteractive/RDP) from internal IP.
+      Attacker pivoting through network via Remote Desktop.
+    severity: HIGH
+    category: lateral_movement
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(LogonType.*10|LogonType\s*=\s*10|
+      RemoteInteractive|
+      EventID.*4624.*LogonType.*10|
+      TerminalServices|RDP.*connection\s+from)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+        sub_technique: ".001"
+    indicators: [source_ip, username, hostname]
+    tags: [rdp, lateral_movement, windows]
+
+  - id: LAT-003
+    name: SMB Lateral File Transfer
+    description: >
+      Files written to admin shares (C$, ADMIN$, IPC$) from non-standard
+      source. Attackers stage tools on remote systems via SMB.
+    severity: HIGH
+    category: lateral_movement
+    confidence: 0.80
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(\\\\[^\\]+\\(C\$|ADMIN\$|IPC\$)|
+      net\s+use\s+\\\\|
+      copy\s+.*\\\\\S+\\(C\$|ADMIN\$)|
+      PsExec.*\\\\|
+      wmic.*\/node:|
+      impacket.*smbclient|
+      smbclient.*put\s)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+        sub_technique: ".002"
+    indicators: [source_ip, hostname, message, username]
+    tags: [smb, admin_share, lateral_movement]
+
+  - id: LAT-004
+    name: SSH Pivoting / Tunneling
+    description: >
+      SSH with port-forwarding flags (-L, -R, -D) or ProxyJump indicating
+      network pivoting. Also covers SSH via unusual high ports.
+    severity: HIGH
+    category: lateral_movement
+    confidence: 0.82
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(ssh\s+.*-[LRD]\s+\d+:|ssh\s+.*-w\s+\d+|
+      ssh.*ProxyJump|ssh.*ProxyCommand|
+      Accepted.*port\s+(8[0-9]{3}|9[0-9]{3}|[1-9][0-9]{4})\s|
+      forwarding\s+(local|remote)\s+port|
+      -D\s+\d{4,5}.*socks)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+        sub_technique: ".004"
+    indicators: [source_ip, username, message]
+    tags: [ssh_tunnel, pivoting, lateral_movement]
+
+  - id: LAT-005
+    name: Kerberoasting â€” TGS Ticket Spike (EventID 4769)
+    description: >
+      Multiple EventID 4769 (Kerberos service ticket requests) for different
+      service accounts from single user/IP. Kerberoasting enumeration.
+      RC4 encryption (0x17) is strongest indicator â€” AES-only blocks this.
+    severity: CRITICAL
+    category: lateral_movement
+    confidence: 0.88
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(EventID.*4769|
+      Kerberos.*ServiceTicket.*RC4|
+      TicketEncryptionType.*0x17|
+      4769.*0x17|
+      ServiceName.*\$.*TicketEncryptionType|
+      GetST\.py|Rubeus.*kerberoast|impacket.*GetUserSPNs)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1558
+        technique_name: Steal or Forge Kerberos Tickets
+        sub_technique: ".003"
+    indicators: [source_ip, username, hostname, message]
+    tags: [kerberoasting, kerberos, active_directory, interview-testable]
+
+  - id: LAT-006
+    name: DCSync Attack
+    description: >
+      Directory replication rights abused to dump all domain credentials.
+      EventID 4662 with DS-Replication-Get-Changes-All rights accessed
+      by a non-DC account. Mimikatz lsadump::dcsync pattern.
+    severity: CRITICAL
+    category: lateral_movement
+    confidence: 0.92
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(lsadump::dcsync|
+      1131f6aa-9c07-11d1-f79f-00c04fc2dcd2|
+      1131f6ad-9c07-11d1-f79f-00c04fc2dcd2|
+      DS-Replication-Get-Changes-All|
+      drsuapi.*DsGetNCChanges|
+      secretsdump.*\.py|impacket.*secretsdump)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1003
+        technique_name: OS Credential Dumping
+        sub_technique: ".006"
+    indicators: [source_ip, username, hostname, message]
+    tags: [dcsync, active_directory, mimikatz, critical]
+
+  - id: LAT-007
+    name: WinRM / PSRemoting Lateral Movement
+    description: >
+      Windows Remote Management or PowerShell Remoting session initiated.
+      Legitimate admin tool frequently abused for lateral movement.
+    severity: MEDIUM
+    category: lateral_movement
+    confidence: 0.75
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(WSMan|WinRM|PSRemoting|
+      New-PSSession|Enter-PSSession|Invoke-Command.*ComputerName|
+      EventID.*4688.*wsmprovhost|
+      winrm.*service|port\s+5985|port\s+5986|
+      winrs\s+-r:)
+    mitre:
+      - tactic_id: TA0008
+        tactic_name: Lateral Movement
+        technique_id: T1021
+        technique_name: Remote Services
+        sub_technique: ".006"
+    indicators: [source_ip, username, hostname, message]
+    tags: [winrm, psremoting, lateral_movement, windows]
+
+  - id: LAT-008
+    name: LLMNR / NBT-NS Poisoning Tool
+    description: >
+      Responder or Inveigh tool signatures in logs. These tools poison
+      LLMNR/NBT-NS broadcasts to capture NTLM hashes from the network.
+    severity: CRITICAL
+    category: lateral_movement
+    confidence: 0.90
+    type: regex
+    match_field: message
+    pattern: >-
+      (?i)(Responder\s+v|NBT-NS\s+Poisoning|LLMNR\s+Poisoning|
+      Inveigh\s+v|Invoke-Inveigh|
+      \[NBT-NS\].*Poisoned|
+      \[LLMNR\].*Poisoned|
+      NTLMv[12]\s+captured|
+      SMB\s+NTLMv2|poisoning\s+started)
+    mitre:
+      - tactic_id: TA0006
+        tactic_name: Credential Access
+        technique_id: T1557
+        technique_name: Adversary-in-the-Middle
+        sub_technique: ".001"
+    indicators: [source_ip, hostname, message]
+    tags: [llmnr, nbtnns, responder, credential_relay, interview-testable]

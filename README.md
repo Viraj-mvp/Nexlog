@@ -1,4 +1,4 @@
-<<p align="center">
+<p align="center">
   <img src="https://capsule-render.vercel.app/api?type=waving&height=230&color=0:031B34,35:005F73,70:0A9396,100:94D2BD&text=NexLog&fontColor=FFFFFF&fontSize=68&fontAlignY=38&desc=Local-first%20DFIR%20log%20analysis%20for%20analysts%20who%20keep%20evidence%20close&descAlignY=58&animation=fadeIn" />
 </p>
 

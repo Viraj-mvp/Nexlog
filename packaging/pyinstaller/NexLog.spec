@@ -1,39 +1,54 @@
 # -*- mode: python ; coding: utf-8 -*-
+"""Reference PyInstaller spec for NexLog.
+
+The preferred build path is `python scripts/package_release.py --binary`,
+which generates an OS-appropriate command from the current checkout. This spec
+is kept as a readable template for maintainers.
+"""
+
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('E:\\Projects\\CYBER\\log analyser-v2\\nexlog', 'nexlog'), ('E:\\Projects\\CYBER\\log analyser-v2\\examples\\logs', 'examples/logs'), ('E:\\Projects\\CYBER\\log analyser-v2\\.env.example', '.env.example'), ('E:\\Projects\\CYBER\\log analyser-v2\\README.md', 'README.md'), ('E:\\Projects\\CYBER\\log analyser-v2\\docs', 'docs'), ('E:\\Projects\\CYBER\\log analyser-v2\\LICENSE', 'LICENSE')]
-binaries = []
-hiddenimports = ['yaml', 'defusedxml', 'ijson', 'Evtx']
-tmp_ret = collect_all('PySide6')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('sentence_transformers')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('chromadb')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('sklearn')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('transformers')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('torch')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('tokenizers')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('numpy')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('reportlab')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+ROOT = Path.cwd()
 
+datas = [
+    (str(ROOT / "nexlog"), "nexlog"),
+    (str(ROOT / "examples" / "logs"), "examples/logs"),
+    (str(ROOT / ".env.example"), ".env.example"),
+    (str(ROOT / "README.md"), "README.md"),
+    (str(ROOT / "docs"), "docs"),
+    (str(ROOT / "LICENSE"), "LICENSE"),
+]
+binaries = []
+hiddenimports = ["yaml", "defusedxml", "ijson", "Evtx"]
+
+for package in [
+    "PySide6",
+    "sentence_transformers",
+    "chromadb",
+    "sklearn",
+    "transformers",
+    "torch",
+    "tokenizers",
+    "numpy",
+    "reportlab",
+]:
+    collected = collect_all(package)
+    datas += collected[0]
+    binaries += collected[1]
+    hiddenimports += collected[2]
 
 a = Analysis(
-    ['E:\\Projects\\CYBER\\log analyser-v2\\main_gui.py'],
-    pathex=[],
+    [str(ROOT / "main_gui.py")],
+    pathex=[str(ROOT), str(ROOT / "nexlog")],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt6', 'PyQt5', 'PySide2'],
+    excludes=["PyQt6", "PyQt5", "PySide2"],
     noarchive=False,
     optimize=0,
 )
@@ -45,7 +60,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='NexLog',
+    name="NexLog",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -58,5 +73,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['E:\\Projects\\CYBER\\log analyser-v2\\nexlog\\interface\\gui\\assets\\nexlog-icon.ico'],
+    icon=str(ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"),
 )

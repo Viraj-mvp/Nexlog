@@ -1,0 +1,32 @@
+title = "NexLog Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow documented placeholders, tests, and generated local paths only."
+paths = [
+  '''(^|/)\.env\.example$''',
+  '''(^|/)\.env\.shared\.example$''',
+  '''(^|/)\.env\.gui\.example$''',
+  '''(^|/)\.env\.web\.example$''',
+  '''(^|/)examples/logs/''',
+  '''(^|/)build/''',
+  '''(^|/)dist/''',
+  '''(^|/)release/''',
+  '''(^|/)workspace/''',
+  '''(^|/)pytest-cache-files-[^/]+/''',
+]
+regexes = [
+  '''ci-test-key''',
+  '''test-key''',
+  '''wrong-key''',
+  '''valid-secret-key''',
+  '''change-me-[A-Za-z0-9_-]+''',
+  '''replace-me-[A-Za-z0-9_-]*''',
+  '''example[_-]?(key|token|secret)''',
+  '''local[_-]?dev[_-]?example[_-]?key''',
+  '''nxl_test_[A-Za-z0-9_-]+''',
+  '''sk-ant-\.\.\.''',
+  '''sk-nexlog-<random>''',
+]

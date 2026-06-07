@@ -68,11 +68,16 @@ def _path_is_usable_tmp_root(root: Path) -> tuple[bool, bool]:
 def _choose_pytest_tmp_root() -> Path:
     """Pick a temp root that allows create/write/read on Windows."""
     global _PYTEST_TMP_CAN_DELETE
-    candidates = [
+    candidates: list[Path] = []
+    for env_name in ("NEXLOG_PYTEST_TMP_ROOT", "RUNNER_TEMP"):
+        env_value = os.environ.get(env_name)
+        if env_value:
+            candidates.append(Path(env_value).expanduser() / f"run-{os.getpid()}")
+    candidates.extend([
         _ROOT / "workspace" / "pytest-tmp-runs" / f"run-{os.getpid()}",
         Path(tempfile.gettempdir()) / "nexlog-pytest" / f"run-{os.getpid()}",
         Path("C:/tmp") / "nexlog-pytest" / f"run-{os.getpid()}",
-    ]
+    ])
     for candidate in candidates:
         usable, can_delete = _path_is_usable_tmp_root(candidate)
         if usable:

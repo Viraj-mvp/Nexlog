@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build clean NexLog source ZIPs and native PyInstaller binaries."""
+"""Build NexLog source archives, native app bundles, and installer releases."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -17,6 +18,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_DIR = ROOT / "release"
+BUILD_DIR = ROOT / "build" / "release"
+APP_DISPLAY_NAME = "NexLog"
+LINUX_DEPENDS = (
+    "libc6, libegl1, libgl1, libxkbcommon-x11-0, libxcb-cursor0, "
+    "libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, "
+    "libxcb-render-util0, libxcb-shape0, libxcb-xinerama0"
+)
 
 
 def _project_version() -> str:
@@ -123,7 +131,33 @@ def _add_data_arg(source: Path, dest: str) -> str:
     return f"{source}{os.pathsep}{dest}"
 
 
-def _pyinstaller_command(onefile: bool = True) -> list[str]:
+def _machine() -> str:
+    machine = platform.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "x64"
+    if machine == "aarch64":
+        return "arm64"
+    return machine
+
+
+def _deb_architecture() -> str:
+    machine = _machine()
+    if machine == "x64":
+        return "amd64"
+    if machine == "arm64":
+        return "arm64"
+    return machine
+
+
+def _system() -> str:
+    return platform.system().lower()
+
+
+def _exe_suffix() -> str:
+    return ".exe" if _system() == "windows" else ""
+
+
+def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile: bool = True) -> list[str]:
     icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
     cmd = [
         sys.executable,
@@ -131,9 +165,9 @@ def _pyinstaller_command(onefile: bool = True) -> list[str]:
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--windowed",
+        "--windowed" if windowed else "--console",
         "--name",
-        "NexLog",
+        name,
         "--distpath",
         str(RELEASE_DIR),
         "--workpath",
@@ -180,93 +214,305 @@ def _pyinstaller_command(onefile: bool = True) -> list[str]:
             "ijson",
             "--hidden-import",
             "Evtx",
-            str(ROOT / "main_gui.py"),
+            str(entrypoint),
         ]
     )
     return cmd
+
+
+def _run_pyinstaller(entrypoint: Path, name: str, *, windowed: bool) -> int:
+    cmd = _pyinstaller_command(entrypoint, name, windowed=windowed, onefile=True)
+    print(f"Running PyInstaller one-file build for {name}...")
+    proc = subprocess.run(cmd, cwd=ROOT)
+    if proc.returncode != 0:
+        print(f"PyInstaller one-file build failed for {name}.")
+    return proc.returncode
+
+
+def _built_path(name: str) -> Path:
+    ext = _exe_suffix()
+    onefile = RELEASE_DIR / f"{name}{ext}"
+    if onefile.exists():
+        return onefile
+    folder = RELEASE_DIR / name
+    if folder.exists():
+        return folder
+    return onefile
+
+
+def build_app_binaries() -> int:
+    RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+    if shutil.which("pyinstaller") is None:
+        print("PyInstaller command not found; trying python -m PyInstaller.")
+
+    builds = [
+        (ROOT / "main_gui.py", "NexLog", True),
+        (ROOT / "main.py", "nexlog", False),
+    ]
+    for entrypoint, name, windowed in builds:
+        rc = _run_pyinstaller(entrypoint, name, windowed=windowed)
+        if rc != 0:
+            return rc
+    return 0
+
+
+def _copy_any(src: Path, dest: Path) -> None:
+    if src.is_dir():
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+
+
+def _stage_app_bundle() -> Path:
+    stage = BUILD_DIR / "bundle" / "NexLog"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True, exist_ok=True)
+
+    for binary_name in ["NexLog", "nexlog"]:
+        src = _built_path(binary_name)
+        if not src.exists() or not src.is_file():
+            raise FileNotFoundError(f"Missing built binary: {src}")
+        _copy_any(src, stage / src.name)
+        if src.is_file() and _system() != "windows":
+            (stage / src.name).chmod(0o755)
+
+    for src_name in [".env.example", "README.md", "LICENSE"]:
+        src = ROOT / src_name
+        if src.exists():
+            shutil.copy2(src, stage / src_name)
+
+    examples_logs = ROOT / "examples" / "logs"
+    if examples_logs.exists():
+        shutil.copytree(examples_logs, stage / "examples" / "logs")
+
+    icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"
+    if icon.exists():
+        assets = stage / "assets"
+        assets.mkdir(exist_ok=True)
+        shutil.copy2(icon, assets / "nexlog-icon.png")
+    return stage
+
+
+def _ensure_app_binaries() -> int:
+    if _built_path("NexLog").exists() and _built_path("nexlog").exists():
+        return 0
+    return build_app_binaries()
 
 
 def build_binary(exe_only: bool = False) -> int:
     if exe_only and platform.system() != "Windows":
         print("Windows .exe builds must be run on Windows.", file=sys.stderr)
         return 2
-    RELEASE_DIR.mkdir(parents=True, exist_ok=True)
-    if shutil.which("pyinstaller") is None:
-        print("PyInstaller command not found; trying python -m PyInstaller.")
-    cmd = _pyinstaller_command(onefile=True)
-    print("Running PyInstaller one-file build...")
-    proc = subprocess.run(cmd, cwd=ROOT)
-    
-    if proc.returncode != 0:
-        print("One-file build failed; trying portable folder build...")
-        cmd = _pyinstaller_command(onefile=False)
-        proc = subprocess.run(cmd, cwd=ROOT)
-        if proc.returncode != 0:
-            print("PyInstaller build failed.")
-            return proc.returncode
+    rc = build_app_binaries()
+    if rc != 0:
+        return rc
 
-    # If build succeeded, package it into a neat release ZIP with accessories
-    sys_name = platform.system().lower()
-    machine = platform.machine().lower()
-    if machine in {"amd64", "x86_64"}:
-        machine = "x64"
-    elif machine == "aarch64":
-        machine = "arm64"
-        
-    ext = ".exe" if sys_name == "windows" else ""
-    binary_path = RELEASE_DIR / f"NexLog{ext}"
-    
-    if not binary_path.exists():
-        # Check if portable folder was built instead
-        dist_dir = RELEASE_DIR / "NexLog"
-        if dist_dir.exists() and dist_dir.is_dir():
-            print(f"Portable folder built at {dist_dir}. Packaging folder...")
-            zip_name = f"NexLog-v{VERSION}-{sys_name}-{machine}.zip"
-            zip_path = RELEASE_DIR / zip_name
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                # Add portable folder contents
-                for path in dist_dir.rglob("*"):
-                    if path.is_file():
-                        zf.write(path, Path("NexLog") / path.relative_to(dist_dir))
-                # Add other resources
-                for src_name in [".env.example", "README.md", "LICENSE"]:
-                    src = ROOT / src_name
-                    if src.exists():
-                        zf.write(src, Path("NexLog") / src_name)
-                # Add examples/logs
-                examples_logs = ROOT / "examples" / "logs"
-                if examples_logs.exists():
-                    for path in examples_logs.rglob("*"):
-                        if path.is_file():
-                            zf.write(path, Path("NexLog") / "examples" / "logs" / path.relative_to(examples_logs))
-            print(f"Created portable zip release at: {zip_path}")
-            return 0
-        else:
-            print(f"Error: Could not locate built binary or directory at {binary_path}.", file=sys.stderr)
-            return 1
-
-    # Package one-file executable into a neat release ZIP
-    zip_name = f"NexLog-v{VERSION}-{sys_name}-{machine}.zip"
+    stage = _stage_app_bundle()
+    zip_name = f"NexLog-v{VERSION}-{_system()}-{_machine()}.zip"
     zip_path = RELEASE_DIR / zip_name
-    print(f"Packaging executable and assets into {zip_name}...")
-    
+    print(f"Packaging app bundle into {zip_name}...")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # Add the binary
-        zf.write(binary_path, Path("NexLog") / binary_path.name)
-        # Add other resources
-        for src_name in [".env.example", "README.md", "LICENSE"]:
-            src = ROOT / src_name
-            if src.exists():
-                zf.write(src, Path("NexLog") / src_name)
-        # Add examples/logs
-        examples_logs = ROOT / "examples" / "logs"
-        if examples_logs.exists():
-            for path in examples_logs.rglob("*"):
-                if path.is_file():
-                    zf.write(path, Path("NexLog") / "examples" / "logs" / path.relative_to(examples_logs))
-                    
-    print(f"Created executable zip release at: {zip_path}")
+        for path in stage.rglob("*"):
+            if path.is_file():
+                zf.write(path, Path("NexLog") / path.relative_to(stage))
+    print(f"Created app zip release at: {zip_path}")
     return 0
+
+
+def _inno_path() -> str | None:
+    found = shutil.which("ISCC") or shutil.which("ISCC.exe")
+    if found:
+        return found
+    for candidate in [
+        Path(os.environ.get("ProgramFiles(x86)", "")) / "Inno Setup 6" / "ISCC.exe",
+        Path(os.environ.get("ProgramFiles", "")) / "Inno Setup 6" / "ISCC.exe",
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def build_windows_installer() -> int:
+    if _system() != "windows":
+        print("Windows installer builds must be run on Windows.", file=sys.stderr)
+        return 2
+    rc = _ensure_app_binaries()
+    if rc != 0:
+        return rc
+    stage = _stage_app_bundle()
+    iscc = _inno_path()
+    if not iscc:
+        print("Inno Setup compiler ISCC.exe not found.", file=sys.stderr)
+        return 2
+
+    script_dir = BUILD_DIR / "installer"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    script = script_dir / "NexLog.iss"
+    output_base = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
+    icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
+    license_file = ROOT / "LICENSE"
+    script.write_text(
+        f"""
+[Setup]
+AppId={{{{7C4B926F-80B7-48E8-8EB8-FB3AF2C18A10}}}}
+AppName={APP_DISPLAY_NAME}
+AppVersion={VERSION}
+AppPublisher=NexLog Contributors
+DefaultDirName={{autopf}}\\NexLog
+DefaultGroupName=NexLog
+OutputDir={RELEASE_DIR}
+OutputBaseFilename={output_base}
+Compression=lzma2
+SolidCompression=yes
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
+DisableProgramGroupPage=yes
+SetupIconFile={icon}
+LicenseFile={license_file}
+
+[Files]
+Source: "{stage}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{{group}}\\NexLog"; Filename: "{{app}}\\NexLog.exe"; WorkingDir: "{{app}}"
+Name: "{{group}}\\NexLog CLI"; Filename: "{{app}}\\nexlog.exe"; WorkingDir: "{{app}}"
+Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\NexLog.exe"; WorkingDir: "{{app}}"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+""".lstrip(),
+        encoding="utf-8",
+    )
+    proc = subprocess.run([iscc, str(script)], cwd=ROOT)
+    return proc.returncode
+
+
+def _tar_add(tf, path: Path, arcname: Path) -> None:
+    import tarfile
+
+    info = tf.gettarinfo(str(path), arcname.as_posix())
+    if path.name in {"NexLog", "nexlog"}:
+        info.mode = 0o755
+    if path.is_file():
+        with path.open("rb") as fh:
+            tf.addfile(info, fh)
+    else:
+        tf.addfile(info)
+
+
+def build_linux_tarball() -> Path:
+    import tarfile
+
+    stage = _stage_app_bundle()
+    tar_path = RELEASE_DIR / f"NexLog-v{VERSION}-linux-{_machine()}.tar.gz"
+    if tar_path.exists():
+        tar_path.unlink()
+    with tarfile.open(tar_path, "w:gz") as tf:
+        for path in stage.rglob("*"):
+            _tar_add(tf, path, Path("NexLog") / path.relative_to(stage))
+    print(f"Created Linux portable tarball: {tar_path}")
+    return tar_path
+
+
+def build_linux_deb() -> Path:
+    if _system() != "linux":
+        raise RuntimeError("Linux .deb builds must be run on Linux.")
+    stage = _stage_app_bundle()
+    package_root = BUILD_DIR / "deb" / f"nexlog_{VERSION}_{_machine()}"
+    if package_root.exists():
+        shutil.rmtree(package_root)
+
+    app_dir = package_root / "opt" / "nexlog"
+    shutil.copytree(stage, app_dir)
+    for binary in [app_dir / "NexLog", app_dir / "nexlog"]:
+        if binary.exists():
+            binary.chmod(0o755)
+
+    bin_dir = package_root / "usr" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "nexlog").write_text("#!/bin/sh\nexec /opt/nexlog/nexlog \"$@\"\n", encoding="utf-8")
+    (bin_dir / "nexlog-gui").write_text("#!/bin/sh\nexec /opt/nexlog/NexLog \"$@\"\n", encoding="utf-8")
+    (bin_dir / "nexlog").chmod(0o755)
+    (bin_dir / "nexlog-gui").chmod(0o755)
+
+    icon_dir = package_root / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+    icon_dir.mkdir(parents=True, exist_ok=True)
+    icon_src = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"
+    if icon_src.exists():
+        shutil.copy2(icon_src, icon_dir / "nexlog.png")
+
+    desktop_dir = package_root / "usr" / "share" / "applications"
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+    (desktop_dir / "nexlog.desktop").write_text(
+        """[Desktop Entry]
+Type=Application
+Name=NexLog
+Comment=Local-first DFIR log analyzer
+Exec=nexlog-gui
+Icon=nexlog
+Terminal=false
+Categories=Security;Utility;
+""",
+        encoding="utf-8",
+    )
+
+    debian = package_root / "DEBIAN"
+    debian.mkdir(parents=True, exist_ok=True)
+    installed_size = sum(path.stat().st_size for path in package_root.rglob("*") if path.is_file()) // 1024
+    (debian / "control").write_text(
+        f"""Package: nexlog
+Version: {VERSION}
+Section: utils
+Priority: optional
+Architecture: {_deb_architecture()}
+Maintainer: NexLog Contributors
+Depends: {LINUX_DEPENDS}
+Installed-Size: {installed_size}
+Description: Local-first DFIR log analyzer
+ NexLog is a desktop GUI and CLI tool for analyzing security logs.
+""",
+        encoding="utf-8",
+    )
+
+    deb_path = RELEASE_DIR / f"NexLog-v{VERSION}-linux-{_machine()}.deb"
+    proc = subprocess.run(["dpkg-deb", "--build", str(package_root), str(deb_path)], cwd=ROOT)
+    if proc.returncode != 0:
+        raise RuntimeError("dpkg-deb failed")
+    print(f"Created Linux deb package: {deb_path}")
+    return deb_path
+
+
+def build_linux_packages() -> int:
+    if _system() != "linux":
+        print("Linux packages must be built on Linux.", file=sys.stderr)
+        return 2
+    rc = _ensure_app_binaries()
+    if rc != 0:
+        return rc
+    build_linux_tarball()
+    build_linux_deb()
+    return 0
+
+
+def write_checksums() -> Path:
+    checksum_path = RELEASE_DIR / f"NexLog-v{VERSION}-checksums.txt"
+    candidates = sorted(
+        path for path in RELEASE_DIR.iterdir()
+        if path.is_file()
+        and path.name.startswith(f"NexLog-v{VERSION}-")
+        and path.name != checksum_path.name
+        and path.suffix not in {".spec"}
+    )
+    with checksum_path.open("w", encoding="utf-8", newline="\n") as fh:
+        for path in candidates:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            fh.write(f"{digest}  {path.name}\n")
+    print(f"Created checksums: {checksum_path}")
+    return checksum_path
 
 
 
@@ -279,23 +525,40 @@ def main() -> int:
     parser.add_argument("--source-zip", action="store_true", help="Create clean source ZIP.")
     parser.add_argument("--binary", action="store_true", help="Build native PyInstaller binary for this OS.")
     parser.add_argument("--exe", action="store_true", help="Build Windows NexLog.exe; requires Windows.")
+    parser.add_argument("--windows-installer", action="store_true", help="Build Windows setup installer; requires Windows and Inno Setup.")
+    parser.add_argument("--linux-packages", action="store_true", help="Build Linux .deb and portable .tar.gz packages.")
+    parser.add_argument("--checksums", action="store_true", help="Write SHA-256 checksums for release assets.")
     parser.add_argument("--all", action="store_true", help="Run checks, build ZIP, and build native binary.")
     parser.add_argument("--skip-check", action="store_true", help="Do not run release_check before building.")
     args = parser.parse_args()
 
-    if not any((args.source_zip, args.binary, args.exe, args.all)):
+    if not any((args.source_zip, args.binary, args.exe, args.windows_installer, args.linux_packages, args.checksums, args.all)):
         parser.print_help()
         return 0
-    if not args.skip_check and (args.all or args.binary or args.exe):
+    if not args.skip_check and (args.all or args.binary or args.exe or args.windows_installer or args.linux_packages):
         rc = run_release_check()
         if rc != 0:
             return rc
     if args.source_zip or args.all:
         build_source_zip()
+    if args.windows_installer:
+        rc = build_windows_installer()
+        if rc != 0:
+            return rc
+    if args.linux_packages:
+        rc = build_linux_packages()
+        if rc != 0:
+            return rc
     if args.exe:
-        return build_binary(exe_only=True)
+        rc = build_binary(exe_only=True)
+        if rc != 0:
+            return rc
     if args.binary or args.all:
-        return build_binary(exe_only=False)
+        rc = build_binary(exe_only=False)
+        if rc != 0:
+            return rc
+    if args.checksums:
+        write_checksums()
     return 0
 
 

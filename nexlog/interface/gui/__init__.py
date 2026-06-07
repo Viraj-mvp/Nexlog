@@ -1,8 +1,7 @@
 """Active NexLog desktop GUI package.
 
-The production desktop app is QML-only. The previous PySide6 Widgets GUI is
-archived under ``docs/archive/legacy-widgets-gui`` for reference and is not
-imported by runtime package initialization.
+The production desktop app is QML-only. Retired PySide6 Widgets modules are
+kept out of the runtime package and public source tree.
 """
 
 from .cyber_bridge import CyberBridge

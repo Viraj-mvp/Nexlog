@@ -40,7 +40,7 @@ Try the safe renderer first:
 python -B main_gui.py --hardware-mode conservative
 ```
 
-If QML still fails, NexLog automatically retries with reduced motion and software rendering, then prints diagnostics. The old Widgets GUI is archived for reference and is no longer a runtime fallback.
+If QML still fails, NexLog automatically retries with reduced motion and software rendering, then prints diagnostics. The old Widgets GUI is no longer a runtime fallback.
 
 Run diagnostics:
 

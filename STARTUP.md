@@ -127,7 +127,7 @@ NexLog can reduce overload risk with worker limits, bounded batches, line caps, 
 ## Troubleshooting
 
 - GUI does not open: run `python -B main_gui.py --hardware-mode conservative`.
-- GUI still does not open: run `python -B main_gui.py --preflight`; NexLog will retry QML in safe software-rendering mode and print diagnostics. The old Widgets GUI is archived and no longer used as a runtime fallback.
+- GUI still does not open: run `python -B main_gui.py --preflight`; NexLog will retry QML in safe software-rendering mode and print diagnostics. The old Widgets GUI is no longer used as a runtime fallback.
 - Web says API key missing: set `NEXLOG_API_KEY`.
 - Analysis is slow: use `--profile fast`, lower severity filters, or run in `performance` mode on a workstation.
 - Machine feels overloaded: switch to `conservative`, reduce `NEXLOG_MAX_WORKERS`, and lower `NEXLOG_BATCH_SIZE`.

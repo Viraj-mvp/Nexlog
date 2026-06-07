@@ -1,7 +1,6 @@
 """Active NexLog QML GUI smoke tests.
 
-The legacy PySide6 Widgets GUI is archived under docs/archive and is no longer
-part of the active desktop runtime.
+Retired PySide6 Widgets modules are not part of the active desktop runtime.
 """
 
 from __future__ import annotations
@@ -87,15 +86,13 @@ def test_bridge_ai_config_snapshot_is_masked():
     assert snapshot["envPath"].endswith(".env.gui")
 
 
-def test_legacy_widgets_gui_is_archived_not_active():
+def test_legacy_widgets_gui_is_removed_from_active_runtime():
     active_dir = ROOT / "interface" / "gui"
     archive_dir = Path(pathconfig.REPO_ROOT_PATH) / "docs" / "archive" / "legacy-widgets-gui"
     assert not (active_dir / "main_window.py").exists()
     assert not (active_dir / "dashboard.py").exists()
     assert not (active_dir / "glass_widget.py").exists()
-    assert (archive_dir / "main_window.py").exists()
-    assert (archive_dir / "glass_widget.py").exists()
-    assert (archive_dir / "README.md").exists()
+    assert not archive_dir.exists()
 
 
 def _sample_findings(count: int = 80) -> list[dict[str, object]]:

@@ -17,6 +17,7 @@ __pycache__/
 *$py.class
 .pytest_cache/
 .pytest-tmp-local/
+pytest-cache-files-*/
 .ruff_cache/
 .mypy_cache/
 .coverage
@@ -40,18 +41,24 @@ release/
 
 # Runtime forensic data and local workspaces
 workspace/
+nexlog/workspace/
 test.ai/
 *.facase
 *.facase-journal
 *.nexlogcase
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 .abuseipdb_cache.db*
 
 # Generated reports and logs
 reports/
+output/
 output/*.pdf
 output/*.json
 output/*.md
@@ -67,6 +74,10 @@ pip_err.txt
 # Large external data
 *.mmdb
 GeoLite2-*.tar.gz
+
+# Frontend dependencies
+node_modules/
+website/node_modules/
 
 # OS and editor files
 .vscode/

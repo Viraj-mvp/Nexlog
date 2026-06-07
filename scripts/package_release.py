@@ -194,13 +194,12 @@ def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile
             cmd.extend(["--add-data", _add_data_arg(source, dest)])
     for package in [
         "PySide6",
-        "sentence_transformers",
-        "chromadb",
-        "sklearn",
-        "transformers",
-        "torch",
-        "tokenizers",
+        "fastapi",
+        "uvicorn",
+        "multipart",
+        "maxminddb",
         "numpy",
+        "sklearn",
         "reportlab",
     ]:
         cmd.extend(["--collect-all", package])

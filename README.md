@@ -6,6 +6,9 @@
   <img src="nexlog/interface/gui/assets/nexlog-logo.png" alt="NexLog Logo" width="260" />
 </p>
 
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=20&duration=2600&pause=900&color=94D2BD&center=true&vCenter=true&width=900&lines=Parse+logs+offline.;Detect+threats+with+YAML+rules.;Map+findings+to+MITRE+ATT%26CK.;Export+IOC%2C+STIX%2C+PDF%2C+JSON.;Investigate+without+sending+data+away." />
+</p>
 
 # NexLog
 

@@ -20,8 +20,6 @@ from typing import Any
 
 import yaml
 
-from PySide6.QtCore import QObject, Property, QThread, Signal, Slot
-from PySide6.QtGui import QGuiApplication
 from interface.gui.crash_guard import (
     get_existing_directory,
     get_open_file_name,
@@ -31,6 +29,7 @@ from interface.gui.crash_guard import (
     safe_slot,
     validate_log_paths,
 )
+from interface.gui.qt_compat import QObject, Property, QGuiApplication, QThread, Signal, Slot
 from utils.runtime_config import load_runtime_config
 
 _ROOT = Path(__file__).resolve().parents[2]

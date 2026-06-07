@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import sys
 from pathlib import Path
 
 import pathconfig
@@ -18,6 +19,8 @@ QML_DIR = ROOT / "interface" / "gui" / "qml"
 
 
 def test_active_gui_package_exports_qml_runtime_only():
+    sys.modules.pop("interface.gui", None)
+    sys.modules.pop("interface.gui.cyber_app", None)
     import interface.gui as gui_pkg
 
     assert "launch" in gui_pkg.__all__
@@ -25,6 +28,16 @@ def test_active_gui_package_exports_qml_runtime_only():
     assert "MainWindow" not in gui_pkg.__all__
     assert hasattr(gui_pkg, "launch")
     assert hasattr(gui_pkg, "CyberBridge")
+    assert "interface.gui.cyber_app" not in sys.modules
+
+
+def test_gui_stub_mode_imports_bridge_without_qtquick():
+    import interface.gui as gui_pkg
+
+    bridge = gui_pkg.CyberBridge(str(Path("workspace") / "gui_stub_import.facase"))
+    assert bridge.casePath.endswith("gui_stub_import.facase")
+    assert callable(gui_pkg.launch)
+    assert "interface.gui.cyber_app" not in sys.modules
 
 
 def test_main_gui_help_has_no_legacy_flag():

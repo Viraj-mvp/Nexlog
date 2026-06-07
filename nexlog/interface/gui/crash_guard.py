@@ -13,8 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, TypeVar
 
-from PySide6.QtCore import Qt, qInstallMessageHandler
-from PySide6.QtWidgets import QApplication, QFileDialog, QWidget
+from .qt_compat import QApplication, QFileDialog, Qt, QWidget, qInstallMessageHandler
 
 try:
     from pathconfig import WORKSPACE_DIR

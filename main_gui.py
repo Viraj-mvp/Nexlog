@@ -60,6 +60,8 @@ def packaged_check(case_path: Path | None = None) -> int:
     """Verify bundled GUI/runtime resources without opening an interactive window."""
     add_root()
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    os.environ.setdefault("QSG_RHI_BACKEND", "software")
     os.environ.setdefault("NEXLOG_HARDWARE_MODE", "conservative")
     os.environ.setdefault("NEXLOG_REDUCED_MOTION", "1")
     checks: list[tuple[str, bool, str]] = []

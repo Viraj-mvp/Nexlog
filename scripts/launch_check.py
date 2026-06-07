@@ -35,6 +35,8 @@ SKIP_DIRS = {
 def _env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    env.setdefault("QT_QUICK_BACKEND", "software")
+    env.setdefault("QSG_RHI_BACKEND", "software")
     env.setdefault("NEXLOG_HARDWARE_MODE", "conservative")
     env.setdefault("NEXLOG_REDUCED_MOTION", "1")
     env.setdefault("NEXLOG_WORKSPACE_DIR", str(Path(tempfile.gettempdir()) / "nexlog-launch-check"))

@@ -179,7 +179,14 @@ def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile
         cmd.append("--onefile")
     if icon.exists():
         cmd.extend(["--icon", str(icon)])
-    for module in ["PyQt6", "PyQt5", "PySide2"]:
+    for module in [
+        "PyQt6",
+        "PyQt5",
+        "PySide2",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineQuick",
+        "PySide6.QtWebEngineWidgets",
+    ]:
         cmd.extend(["--exclude-module", module])
     data_items = [
         (ROOT / "nexlog", "nexlog"),
@@ -194,12 +201,9 @@ def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile
             cmd.extend(["--add-data", _add_data_arg(source, dest)])
     for package in [
         "PySide6",
-        "fastapi",
-        "uvicorn",
-        "multipart",
-        "maxminddb",
         "numpy",
         "sklearn",
+        "maxminddb",
         "reportlab",
     ]:
         cmd.extend(["--collect-all", package])

@@ -82,9 +82,9 @@ jobs:
           $args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target")
           Start-Process -FilePath $installer.FullName -ArgumentList $args -Wait -NoNewWindow
           Push-Location $target
-          & "$target\NexLog.exe" --packaged-check
-          & "$target\nexlog.exe" --help
-          & "$target\nexlog.exe" examples/logs/Apache_2k.log --summary --quiet
+          & "$target\NexLog\NexLog.exe" --packaged-check
+          & "$target\nexlog\nexlog.exe" --help
+          & "$target\nexlog\nexlog.exe" examples/logs/Apache_2k.log --summary --quiet
           Pop-Location
 
       - name: Smoke test Linux packages
@@ -102,9 +102,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nexlog-tar"
           tar -xzf release/NexLog-v${NEXLOG_VERSION#v}-linux-x64.tar.gz -C "$RUNNER_TEMP/nexlog-tar"
           cd "$RUNNER_TEMP/nexlog-tar/NexLog"
-          QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RHI_BACKEND=software "$RUNNER_TEMP/nexlog-tar/NexLog/NexLog" --packaged-check
-          "$RUNNER_TEMP/nexlog-tar/NexLog/nexlog" --help
-          "$RUNNER_TEMP/nexlog-tar/NexLog/nexlog" examples/logs/Apache_2k.log --summary --quiet
+          QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QSG_RHI_BACKEND=software "$RUNNER_TEMP/nexlog-tar/NexLog/NexLog/NexLog" --packaged-check
+          "$RUNNER_TEMP/nexlog-tar/NexLog/nexlog/nexlog" --help
+          "$RUNNER_TEMP/nexlog-tar/NexLog/nexlog/nexlog" examples/logs/Apache_2k.log --summary --quiet
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

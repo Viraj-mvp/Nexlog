@@ -220,12 +220,13 @@ def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile
     return cmd
 
 
-def _run_pyinstaller(entrypoint: Path, name: str, *, windowed: bool) -> int:
-    cmd = _pyinstaller_command(entrypoint, name, windowed=windowed, onefile=True)
-    print(f"Running PyInstaller one-file build for {name}...")
+def _run_pyinstaller(entrypoint: Path, name: str, *, windowed: bool, onefile: bool) -> int:
+    build_kind = "one-file" if onefile else "app-directory"
+    cmd = _pyinstaller_command(entrypoint, name, windowed=windowed, onefile=onefile)
+    print(f"Running PyInstaller {build_kind} build for {name}...")
     proc = subprocess.run(cmd, cwd=ROOT)
     if proc.returncode != 0:
-        print(f"PyInstaller one-file build failed for {name}.")
+        print(f"PyInstaller {build_kind} build failed for {name}.")
     return proc.returncode
 
 
@@ -240,7 +241,7 @@ def _built_path(name: str) -> Path:
     return onefile
 
 
-def build_app_binaries() -> int:
+def build_app_binaries(*, onefile: bool = True) -> int:
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
     if shutil.which("pyinstaller") is None:
         print("PyInstaller command not found; trying python -m PyInstaller.")
@@ -250,7 +251,7 @@ def build_app_binaries() -> int:
         (ROOT / "main.py", "nexlog", False),
     ]
     for entrypoint, name, windowed in builds:
-        rc = _run_pyinstaller(entrypoint, name, windowed=windowed)
+        rc = _run_pyinstaller(entrypoint, name, windowed=windowed, onefile=onefile)
         if rc != 0:
             return rc
     return 0
@@ -274,7 +275,7 @@ def _stage_app_bundle() -> Path:
 
     for binary_name in ["NexLog", "nexlog"]:
         src = _built_path(binary_name)
-        if not src.exists() or not src.is_file():
+        if not src.exists():
             raise FileNotFoundError(f"Missing built binary: {src}")
         _copy_any(src, stage / src.name)
         if src.is_file() and _system() != "windows":
@@ -297,17 +298,27 @@ def _stage_app_bundle() -> Path:
     return stage
 
 
-def _ensure_app_binaries() -> int:
+def _staged_executable(stage: Path, name: str) -> Path:
+    direct = stage / f"{name}{_exe_suffix()}"
+    if direct.exists():
+        return direct
+    nested = stage / name / f"{name}{_exe_suffix()}"
+    if nested.exists():
+        return nested
+    raise FileNotFoundError(f"Missing staged executable for {name}")
+
+
+def _ensure_app_binaries(*, onefile: bool = True) -> int:
     if _built_path("NexLog").exists() and _built_path("nexlog").exists():
         return 0
-    return build_app_binaries()
+    return build_app_binaries(onefile=onefile)
 
 
 def build_binary(exe_only: bool = False) -> int:
     if exe_only and platform.system() != "Windows":
         print("Windows .exe builds must be run on Windows.", file=sys.stderr)
         return 2
-    rc = build_app_binaries()
+    rc = build_app_binaries(onefile=True)
     if rc != 0:
         return rc
 
@@ -340,7 +351,7 @@ def build_windows_installer() -> int:
     if _system() != "windows":
         print("Windows installer builds must be run on Windows.", file=sys.stderr)
         return 2
-    rc = _ensure_app_binaries()
+    rc = build_app_binaries(onefile=False)
     if rc != 0:
         return rc
     stage = _stage_app_bundle()
@@ -355,6 +366,8 @@ def build_windows_installer() -> int:
     output_base = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
     icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
     license_file = ROOT / "LICENSE"
+    gui_exe = str(_staged_executable(stage, "NexLog").relative_to(stage)).replace("/", "\\")
+    cli_exe = str(_staged_executable(stage, "nexlog").relative_to(stage)).replace("/", "\\")
     script.write_text(
         f"""
 [Setup]
@@ -378,9 +391,9 @@ LicenseFile={license_file}
 Source: "{stage}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{{group}}\\NexLog"; Filename: "{{app}}\\NexLog.exe"; WorkingDir: "{{app}}"
-Name: "{{group}}\\NexLog CLI"; Filename: "{{app}}\\nexlog.exe"; WorkingDir: "{{app}}"
-Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\NexLog.exe"; WorkingDir: "{{app}}"; Tasks: desktopicon
+Name: "{{group}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"
+Name: "{{group}}\\NexLog CLI"; Filename: "{{app}}\\{cli_exe}"; WorkingDir: "{{app}}"
+Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
@@ -428,14 +441,16 @@ def build_linux_deb() -> Path:
 
     app_dir = package_root / "opt" / "nexlog"
     shutil.copytree(stage, app_dir)
-    for binary in [app_dir / "NexLog", app_dir / "nexlog"]:
+    for binary in [_staged_executable(app_dir, "NexLog"), _staged_executable(app_dir, "nexlog")]:
         if binary.exists():
             binary.chmod(0o755)
 
     bin_dir = package_root / "usr" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    (bin_dir / "nexlog").write_text("#!/bin/sh\nexec /opt/nexlog/nexlog \"$@\"\n", encoding="utf-8")
-    (bin_dir / "nexlog-gui").write_text("#!/bin/sh\nexec /opt/nexlog/NexLog \"$@\"\n", encoding="utf-8")
+    cli_rel = _staged_executable(app_dir, "nexlog").relative_to(app_dir).as_posix()
+    gui_rel = _staged_executable(app_dir, "NexLog").relative_to(app_dir).as_posix()
+    (bin_dir / "nexlog").write_text(f"#!/bin/sh\nexec /opt/nexlog/{cli_rel} \"$@\"\n", encoding="utf-8")
+    (bin_dir / "nexlog-gui").write_text(f"#!/bin/sh\nexec /opt/nexlog/{gui_rel} \"$@\"\n", encoding="utf-8")
     (bin_dir / "nexlog").chmod(0o755)
     (bin_dir / "nexlog-gui").chmod(0o755)
 
@@ -490,7 +505,7 @@ def build_linux_packages() -> int:
     if _system() != "linux":
         print("Linux packages must be built on Linux.", file=sys.stderr)
         return 2
-    rc = _ensure_app_binaries()
+    rc = build_app_binaries(onefile=False)
     if rc != 0:
         return rc
     build_linux_tarball()

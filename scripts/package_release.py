@@ -339,19 +339,19 @@ def _copy_any(src: Path, dest: Path) -> None:
         shutil.copy2(src, dest)
 
 
-def _stage_app_bundle() -> Path:
-    stage = BUILD_DIR / "bundle" / "NexLog"
+def _stage_gui_bundle() -> Path:
+    stage = BUILD_DIR / "bundle" / "NexLog-GUI"
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True, exist_ok=True)
 
-    for binary_name in ["NexLog", "nexlog"]:
-        src = _built_path(binary_name)
-        if not src.exists():
-            raise FileNotFoundError(f"Missing built binary: {src}")
-        _copy_any(src, stage / src.name)
-        if src.is_file() and _system() != "windows":
-            (stage / src.name).chmod(0o755)
+    binary_name = "NexLog"
+    src = _built_path(binary_name)
+    if not src.exists():
+        raise FileNotFoundError(f"Missing built GUI binary: {src}")
+    _copy_any(src, stage / src.name)
+    if src.is_file() and _system() != "windows":
+        (stage / src.name).chmod(0o755)
 
     for src_name in [".env.example", "README.md", "LICENSE"]:
         src = ROOT / src_name
@@ -367,6 +367,31 @@ def _stage_app_bundle() -> Path:
         assets = stage / "assets"
         assets.mkdir(exist_ok=True)
         shutil.copy2(icon, assets / "nexlog-icon.png")
+    return stage
+
+
+def _stage_cli_bundle() -> Path:
+    stage = BUILD_DIR / "bundle" / "NexLog-CLI"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True, exist_ok=True)
+
+    binary_name = "nexlog"
+    src = _built_path(binary_name)
+    if not src.exists():
+        raise FileNotFoundError(f"Missing built CLI binary: {src}")
+    _copy_any(src, stage / src.name)
+    if src.is_file() and _system() != "windows":
+        (stage / src.name).chmod(0o755)
+
+    for src_name in [".env.example", "README.md", "LICENSE"]:
+        src = ROOT / src_name
+        if src.exists():
+            shutil.copy2(src, stage / src_name)
+
+    examples_logs = ROOT / "examples" / "logs"
+    if examples_logs.exists():
+        shutil.copytree(examples_logs, stage / "examples" / "logs")
     return stage
 
 
@@ -386,23 +411,37 @@ def _ensure_app_binaries(*, onefile: bool = True) -> int:
     return build_app_binaries(onefile=onefile)
 
 
-def build_binary(exe_only: bool = False) -> int:
-    if exe_only and platform.system() != "Windows":
-        print("Windows .exe builds must be run on Windows.", file=sys.stderr)
-        return 2
-    rc = build_app_binaries(onefile=True)
+def build_gui_binary() -> int:
+    rc = _run_pyinstaller(ROOT / "main_gui.py", "NexLog", windowed=True, onefile=True)
     if rc != 0:
         return rc
 
-    stage = _stage_app_bundle()
-    zip_name = f"NexLog-v{VERSION}-{_system()}-{_machine()}.zip"
+    stage = _stage_gui_bundle()
+    zip_name = f"NexLog-GUI-v{VERSION}-{_system()}-{_machine()}.zip"
     zip_path = RELEASE_DIR / zip_name
-    print(f"Packaging app bundle into {zip_name}...")
+    print(f"Packaging GUI bundle into {zip_name}...")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for path in stage.rglob("*"):
             if path.is_file():
-                zf.write(path, Path("NexLog") / path.relative_to(stage))
-    print(f"Created app zip release at: {zip_path}")
+                zf.write(path, Path("NexLog-GUI") / path.relative_to(stage))
+    print(f"Created GUI zip release at: {zip_path}")
+    return 0
+
+
+def build_cli_binary() -> int:
+    rc = _run_pyinstaller(ROOT / "main.py", "nexlog", windowed=False, onefile=True)
+    if rc != 0:
+        return rc
+
+    stage = _stage_cli_bundle()
+    zip_name = f"NexLog-CLI-v{VERSION}-{_system()}-{_machine()}.zip"
+    zip_path = RELEASE_DIR / zip_name
+    print(f"Packaging CLI bundle into {zip_name}...")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in stage.rglob("*"):
+            if path.is_file():
+                zf.write(path, Path("NexLog-CLI") / path.relative_to(stage))
+    print(f"Created CLI zip release at: {zip_path}")
     return 0
 
 
@@ -419,14 +458,14 @@ def _inno_path() -> str | None:
     return None
 
 
-def build_windows_installer() -> int:
+def build_windows_gui_installer() -> int:
     if _system() != "windows":
-        print("Windows installer builds must be run on Windows.", file=sys.stderr)
+        print("Windows GUI installer builds must be run on Windows.", file=sys.stderr)
         return 2
-    rc = build_app_binaries(onefile=False)
+    rc = _run_pyinstaller(ROOT / "main_gui.py", "NexLog", windowed=True, onefile=False)
     if rc != 0:
         return rc
-    stage = _stage_app_bundle()
+    stage = _stage_gui_bundle()
     iscc = _inno_path()
     if not iscc:
         print("Inno Setup compiler ISCC.exe not found.", file=sys.stderr)
@@ -434,21 +473,20 @@ def build_windows_installer() -> int:
 
     script_dir = BUILD_DIR / "installer"
     script_dir.mkdir(parents=True, exist_ok=True)
-    script = script_dir / "NexLog.iss"
-    output_base = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
+    script = script_dir / "NexLog-GUI.iss"
+    output_base = f"NexLog-GUI-v{VERSION}-windows-{_machine()}-setup"
     icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
     license_file = ROOT / "LICENSE"
     gui_exe = str(_staged_executable(stage, "NexLog").relative_to(stage)).replace("/", "\\")
-    cli_exe = str(_staged_executable(stage, "nexlog").relative_to(stage)).replace("/", "\\")
     script.write_text(
         f"""
 [Setup]
 AppId={{{{7C4B926F-80B7-48E8-8EB8-FB3AF2C18A10}}}}
-AppName={APP_DISPLAY_NAME}
+AppName={APP_DISPLAY_NAME} GUI
 AppVersion={VERSION}
 AppPublisher=NexLog Contributors
-DefaultDirName={{autopf}}\\NexLog
-DefaultGroupName=NexLog
+DefaultDirName={{autopf}}\\NexLog-GUI
+DefaultGroupName=NexLog-GUI
 OutputDir={RELEASE_DIR}
 OutputBaseFilename={output_base}
 Compression=lzma2
@@ -464,7 +502,6 @@ Source: "{stage}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs cr
 
 [Icons]
 Name: "{{group}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"
-Name: "{{group}}\\NexLog CLI"; Filename: "{{app}}\\{cli_exe}"; WorkingDir: "{{app}}"
 Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"; Tasks: desktopicon
 
 [Tasks]
@@ -489,41 +526,52 @@ def _tar_add(tf, path: Path, arcname: Path) -> None:
         tf.addfile(info)
 
 
-def build_linux_tarball() -> Path:
+def build_linux_gui_tarball() -> Path:
     import tarfile
 
-    stage = _stage_app_bundle()
-    tar_path = RELEASE_DIR / f"NexLog-v{VERSION}-linux-{_machine()}.tar.gz"
+    stage = _stage_gui_bundle()
+    tar_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-linux-{_machine()}.tar.gz"
     if tar_path.exists():
         tar_path.unlink()
     with tarfile.open(tar_path, "w:gz") as tf:
         for path in stage.rglob("*"):
-            _tar_add(tf, path, Path("NexLog") / path.relative_to(stage))
-    print(f"Created Linux portable tarball: {tar_path}")
+            _tar_add(tf, path, Path("NexLog-GUI") / path.relative_to(stage))
+    print(f"Created Linux GUI portable tarball: {tar_path}")
     return tar_path
 
 
-def build_linux_deb() -> Path:
+def build_linux_cli_tarball() -> Path:
+    import tarfile
+
+    stage = _stage_cli_bundle()
+    tar_path = RELEASE_DIR / f"NexLog-CLI-v{VERSION}-linux-{_machine()}.tar.gz"
+    if tar_path.exists():
+        tar_path.unlink()
+    with tarfile.open(tar_path, "w:gz") as tf:
+        for path in stage.rglob("*"):
+            _tar_add(tf, path, Path("NexLog-CLI") / path.relative_to(stage))
+    print(f"Created Linux CLI portable tarball: {tar_path}")
+    return tar_path
+
+
+def build_linux_gui_deb() -> Path:
     if _system() != "linux":
         raise RuntimeError("Linux .deb builds must be run on Linux.")
-    stage = _stage_app_bundle()
-    package_root = BUILD_DIR / "deb" / f"nexlog_{VERSION}_{_machine()}"
+    stage = _stage_gui_bundle()
+    package_root = BUILD_DIR / "deb" / f"nexlog-gui_{VERSION}_{_machine()}"
     if package_root.exists():
         shutil.rmtree(package_root)
 
-    app_dir = package_root / "opt" / "nexlog"
+    app_dir = package_root / "opt" / "nexlog-gui"
     shutil.copytree(stage, app_dir)
-    for binary in [_staged_executable(app_dir, "NexLog"), _staged_executable(app_dir, "nexlog")]:
-        if binary.exists():
-            binary.chmod(0o755)
+    binary = _staged_executable(app_dir, "NexLog")
+    if binary.exists():
+        binary.chmod(0o755)
 
     bin_dir = package_root / "usr" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    cli_rel = _staged_executable(app_dir, "nexlog").relative_to(app_dir).as_posix()
     gui_rel = _staged_executable(app_dir, "NexLog").relative_to(app_dir).as_posix()
-    (bin_dir / "nexlog").write_text(f"#!/bin/sh\nexec /opt/nexlog/{cli_rel} \"$@\"\n", encoding="utf-8")
-    (bin_dir / "nexlog-gui").write_text(f"#!/bin/sh\nexec /opt/nexlog/{gui_rel} \"$@\"\n", encoding="utf-8")
-    (bin_dir / "nexlog").chmod(0o755)
+    (bin_dir / "nexlog-gui").write_text(f"#!/bin/sh\nexec /opt/nexlog-gui/{gui_rel} \"$@\"\n", encoding="utf-8")
     (bin_dir / "nexlog-gui").chmod(0o755)
 
     icon_dir = package_root / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps"
@@ -534,7 +582,7 @@ def build_linux_deb() -> Path:
 
     desktop_dir = package_root / "usr" / "share" / "applications"
     desktop_dir.mkdir(parents=True, exist_ok=True)
-    (desktop_dir / "nexlog.desktop").write_text(
+    (desktop_dir / "nexlog-gui.desktop").write_text(
         """[Desktop Entry]
 Type=Application
 Name=NexLog
@@ -551,7 +599,7 @@ Categories=Security;Utility;
     debian.mkdir(parents=True, exist_ok=True)
     installed_size = sum(path.stat().st_size for path in package_root.rglob("*") if path.is_file()) // 1024
     (debian / "control").write_text(
-        f"""Package: nexlog
+        f"""Package: nexlog-gui
 Version: {VERSION}
 Section: utils
 Priority: optional
@@ -560,28 +608,86 @@ Maintainer: NexLog Contributors
 Depends: {LINUX_DEPENDS}
 Installed-Size: {installed_size}
 Description: Local-first DFIR log analyzer
- NexLog is a desktop GUI and CLI tool for analyzing security logs.
+ NexLog is a desktop GUI tool for analyzing security logs.
 """,
         encoding="utf-8",
     )
 
-    deb_path = RELEASE_DIR / f"NexLog-v{VERSION}-linux-{_machine()}.deb"
+    deb_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-linux-{_machine()}.deb"
     proc = subprocess.run(["dpkg-deb", "--build", str(package_root), str(deb_path)], cwd=ROOT)
     if proc.returncode != 0:
         raise RuntimeError("dpkg-deb failed")
-    print(f"Created Linux deb package: {deb_path}")
+    print(f"Created Linux GUI deb package: {deb_path}")
     return deb_path
 
 
-def build_linux_packages() -> int:
+def build_linux_cli_deb() -> Path:
     if _system() != "linux":
-        print("Linux packages must be built on Linux.", file=sys.stderr)
+        raise RuntimeError("Linux .deb builds must be run on Linux.")
+    stage = _stage_cli_bundle()
+    package_root = BUILD_DIR / "deb" / f"nexlog-cli_{VERSION}_{_machine()}"
+    if package_root.exists():
+        shutil.rmtree(package_root)
+
+    app_dir = package_root / "opt" / "nexlog-cli"
+    shutil.copytree(stage, app_dir)
+    binary = _staged_executable(app_dir, "nexlog")
+    if binary.exists():
+        binary.chmod(0o755)
+
+    bin_dir = package_root / "usr" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    cli_rel = _staged_executable(app_dir, "nexlog").relative_to(app_dir).as_posix()
+    (bin_dir / "nexlog").write_text(f"#!/bin/sh\nexec /opt/nexlog-cli/{cli_rel} \"$@\"\n", encoding="utf-8")
+    (bin_dir / "nexlog").chmod(0o755)
+
+    debian = package_root / "DEBIAN"
+    debian.mkdir(parents=True, exist_ok=True)
+    installed_size = sum(path.stat().st_size for path in package_root.rglob("*") if path.is_file()) // 1024
+    (debian / "control").write_text(
+        f"""Package: nexlog-cli
+Version: {VERSION}
+Section: utils
+Priority: optional
+Architecture: {_deb_architecture()}
+Maintainer: NexLog Contributors
+Depends: libc6
+Installed-Size: {installed_size}
+Description: Local-first DFIR log analyzer CLI
+ NexLog is a CLI tool for analyzing security logs.
+""",
+        encoding="utf-8",
+    )
+
+    deb_path = RELEASE_DIR / f"NexLog-CLI-v{VERSION}-linux-{_machine()}.deb"
+    proc = subprocess.run(["dpkg-deb", "--build", str(package_root), str(deb_path)], cwd=ROOT)
+    if proc.returncode != 0:
+        raise RuntimeError("dpkg-deb failed")
+    print(f"Created Linux CLI deb package: {deb_path}")
+    return deb_path
+
+
+def build_linux_gui_packages() -> int:
+    if _system() != "linux":
+        print("Linux GUI packages must be built on Linux.", file=sys.stderr)
         return 2
-    rc = build_app_binaries(onefile=False)
+    rc = _run_pyinstaller(ROOT / "main_gui.py", "NexLog", windowed=True, onefile=False)
     if rc != 0:
         return rc
-    build_linux_tarball()
-    build_linux_deb()
+    build_linux_gui_tarball()
+    build_linux_gui_deb()
+    return 0
+
+
+def build_linux_cli_packages() -> int:
+    if _system() != "linux":
+        print("Linux CLI packages must be built on Linux.", file=sys.stderr)
+        return 2
+    rc = _run_pyinstaller(ROOT / "main.py", "nexlog", windowed=False, onefile=False)
+    if rc != 0:
+        return rc
+    build_linux_cli_tarball()
+    build_linux_cli_deb()
     return 0
 
 
@@ -590,7 +696,7 @@ def write_checksums() -> Path:
     candidates = sorted(
         path for path in RELEASE_DIR.iterdir()
         if path.is_file()
-        and path.name.startswith(f"NexLog-v{VERSION}-")
+        and (path.name.startswith(f"NexLog-v{VERSION}-") or path.name.startswith(f"NexLog-GUI-v{VERSION}-") or path.name.startswith(f"NexLog-CLI-v{VERSION}-"))
         and path.name != checksum_path.name
         and path.suffix not in {".spec"}
     )
@@ -610,38 +716,43 @@ def run_release_check() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package NexLog releases.")
     parser.add_argument("--source-zip", action="store_true", help="Create clean source ZIP.")
-    parser.add_argument("--binary", action="store_true", help="Build native PyInstaller binary for this OS.")
-    parser.add_argument("--exe", action="store_true", help="Build Windows NexLog.exe; requires Windows.")
-    parser.add_argument("--windows-installer", action="store_true", help="Build Windows setup installer; requires Windows and Inno Setup.")
-    parser.add_argument("--linux-packages", action="store_true", help="Build Linux .deb and portable .tar.gz packages.")
+    parser.add_argument("--gui", action="store_true", help="Build GUI-only binary package for this OS.")
+    parser.add_argument("--cli", action="store_true", help="Build CLI-only binary package for this OS.")
+    parser.add_argument("--windows-gui-installer", action="store_true", help="Build Windows GUI setup installer; requires Windows and Inno Setup.")
+    parser.add_argument("--linux-gui-packages", action="store_true", help="Build Linux GUI .deb and portable .tar.gz packages.")
+    parser.add_argument("--linux-cli-packages", action="store_true", help="Build Linux CLI .deb and portable .tar.gz packages.")
     parser.add_argument("--checksums", action="store_true", help="Write SHA-256 checksums for release assets.")
-    parser.add_argument("--all", action="store_true", help="Run checks, build ZIP, and build native binary.")
+    parser.add_argument("--all", action="store_true", help="Run checks, build source ZIP, and build both GUI and CLI packages.")
     parser.add_argument("--skip-check", action="store_true", help="Do not run release_check before building.")
     args = parser.parse_args()
 
-    if not any((args.source_zip, args.binary, args.exe, args.windows_installer, args.linux_packages, args.checksums, args.all)):
+    if not any((args.source_zip, args.gui, args.cli, args.windows_gui_installer, args.linux_gui_packages, args.linux_cli_packages, args.checksums, args.all)):
         parser.print_help()
         return 0
-    if not args.skip_check and (args.all or args.binary or args.exe or args.windows_installer or args.linux_packages):
+    if not args.skip_check and (args.all or args.gui or args.cli or args.windows_gui_installer or args.linux_gui_packages or args.linux_cli_packages):
         rc = run_release_check()
         if rc != 0:
             return rc
     if args.source_zip or args.all:
         build_source_zip()
-    if args.windows_installer:
-        rc = build_windows_installer()
+    if args.windows_gui_installer:
+        rc = build_windows_gui_installer()
         if rc != 0:
             return rc
-    if args.linux_packages:
-        rc = build_linux_packages()
+    if args.linux_gui_packages:
+        rc = build_linux_gui_packages()
         if rc != 0:
             return rc
-    if args.exe:
-        rc = build_binary(exe_only=True)
+    if args.linux_cli_packages:
+        rc = build_linux_cli_packages()
         if rc != 0:
             return rc
-    if args.binary or args.all:
-        rc = build_binary(exe_only=False)
+    if args.gui or args.all:
+        rc = build_gui_binary()
+        if rc != 0:
+            return rc
+    if args.cli or args.all:
+        rc = build_cli_binary()
         if rc != 0:
             return rc
     if args.checksums:

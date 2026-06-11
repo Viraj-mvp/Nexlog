@@ -470,56 +470,29 @@ def build_windows_gui_installer() -> int:
         print("Inno Setup compiler ISCC.exe not found.", file=sys.stderr)
         return 2
 
-    script_dir = BUILD_DIR / "installer"
-    script_dir.mkdir(parents=True, exist_ok=True)
-    script = script_dir / "NexLog-Windows.iss"
-    output_base = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
-    icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
-    license_file = ROOT / "LICENSE"
-    gui_exe = str(_staged_executable(stage, "NexLog").relative_to(stage)).replace("/", "\\")
-    cli_exe = "nexlog.exe"  # since we copy it to the root of stage
-    script.write_text(
-        f"""
-[Setup]
-AppId={{{{7C4B926F-80B7-48E8-8EB8-FB3AF2C18A10}}}}
-AppName={APP_DISPLAY_NAME}
-AppVersion={VERSION}
-AppPublisher=NexLog Contributors
-DefaultDirName={{autopf}}\\NexLog
-DefaultGroupName=NexLog
-OutputDir={RELEASE_DIR}
-OutputBaseFilename={output_base}
-Compression=lzma2
-SolidCompression=yes
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
-DisableProgramGroupPage=yes
-SetupIconFile={icon}
-LicenseFile={license_file}
-ChangesEnvironment=yes
-CloseApplications=no
-
-[Files]
-Source: "{stage}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{{group}}\\NexLog (GUI)"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"
-Name: "{{group}}\\NexLog (System Tray)"; Filename: "{{app}}\\{gui_exe}"; Parameters: "--tray"; WorkingDir: "{{app}}"
-Name: "{{group}}\\NexLog (CLI)"; Filename: "{{app}}\\{cli_exe}"; WorkingDir: "{{app}}"
-Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"; Tasks: desktopicon
-Name: "{{commonstartup}}\\NexLog Tray"; Filename: "{{app}}\\{gui_exe}"; Parameters: "--tray"; WorkingDir: "{{app}}"; Tasks: startuptray
-
-[Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut for GUI"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "startuptray"; Description: "Run in system tray on login"; GroupDescription: "Additional options:"; Flags: unchecked
-Name: "addtopath"; Description: "Add to system PATH (for CLI usage)"; GroupDescription: "Additional options:"; Flags: unchecked
-
-[Run]
-Filename: "{{app}}\\{cli_exe}"; Parameters: "--help"; Description: "Test CLI installation"; Flags: nowait postinstall skipifsilent
-""".lstrip(),
-        encoding="utf-8",
+    # Update the version and file paths in the Inno Setup script
+    inno_script = ROOT / "packaging" / "inno" / "nexlog.iss"
+    script_content = inno_script.read_text(encoding="utf-8")
+    script_content = script_content.replace('#define MyAppVersion "1.0.0"', f'#define MyAppVersion "{VERSION}"')
+    
+    # Replace the source directory placeholder with our actual staged directory
+    script_content = script_content.replace(
+        'Source: "{#SourcePath}\\..\\..\\release\\NexLog\\*"', 
+        f'Source: "{stage}\\*"'
     )
-    proc = subprocess.run([iscc, str(script)], cwd=ROOT)
+    
+    # Create a temporary script file with updated values
+    temp_script = BUILD_DIR / "nexlog-temp.iss"
+    temp_script.write_text(script_content, encoding="utf-8")
+
+    # Build the installer using the professional script
+    output_name = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
+    proc = subprocess.run([
+        iscc, 
+        f"/O{RELEASE_DIR}", 
+        f"/F{output_name}",
+        str(temp_script)
+    ], cwd=ROOT)
     return proc.returncode
 
 

@@ -569,7 +569,7 @@ function App() {
           <>
             <section className="hero-card">
               <div>
-                <p className="chip">SpiderFoot-style workflow with NexLog backend</p>
+                <p className="chip">Modern workflow with NexLog backend</p>
                 <h2>Upload evidence, run analysis, see the attack story.</h2>
                 <p>Evidence is validated by the server, jobs run through the real parser/rule engine, and results stay in the case database.</p>
                 <div className="row">

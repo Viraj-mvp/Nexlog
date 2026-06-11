@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 main.py â€” NexLog CLI Entry Point
 Wires Layer 1 (parse) â†’ Layer 2 (detect) â†’ Layer 3 (store + report + IOC)
@@ -1072,8 +1072,17 @@ def main(argv=None) -> int:
             log_paths.append(Path(pattern))
 
     if not log_paths:
-        print("ERROR: no log files matched.", file=sys.stderr)
-        return 1
+        # No log files provided, start the web server!
+        print("No log files provided. Starting NexLog Web UI...")
+        try:
+            from interface.web.serve import _cli_main
+            # Pass remaining arguments to the web server
+            sys.argv[0] = "nexlog serve"
+            _cli_main()
+        except Exception as e:
+            print(f"ERROR: Could not start web server: {e}", file=sys.stderr)
+            return 1
+        return 0
 
     # Rules directory
     rules_dir = Path(args.rules) if args.rules else (

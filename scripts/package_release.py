@@ -553,7 +553,23 @@ Comment=Local-first DFIR log analyzer
 Exec=nexlog-gui
 Icon=nexlog
 Terminal=false
-Categories=Security;Utility;
+Categories=01-info-gathering;Security;Utility;
+Keywords=log;analysis;forensics;security;
+""",
+        encoding="utf-8",
+    )
+    
+    # Add CLI desktop file for web UI too
+    (desktop_dir / "nexlog-web.desktop").write_text(
+        """[Desktop Entry]
+Type=Application
+Name=NexLog Web
+Comment=Local-first DFIR log analyzer - Web Interface
+Exec=nexlog
+Icon=nexlog
+Terminal=true
+Categories=01-info-gathering;Security;Utility;
+Keywords=log;analysis;forensics;security;web;
 """,
         encoding="utf-8",
     )

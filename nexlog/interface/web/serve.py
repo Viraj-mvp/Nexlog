@@ -548,6 +548,11 @@ def run_stdlib_fullstack(
 def _cli_main() -> None:
     """Entry point for the ``nexlog-serve`` console script."""
     import argparse
+    import atexit
+    import signal
+    import subprocess
+    import time
+    from pathlib import Path
 
     parser = argparse.ArgumentParser(
         prog="nexlog-serve",
@@ -562,9 +567,137 @@ def _cli_main() -> None:
     parser.add_argument("--stdlib", action="store_true",
                         help="Use stdlib http.server instead of FastAPI")
     parser.add_argument("--upload-dir", default="", metavar="DIR")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="Don't open the web UI automatically")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run the server in the background (daemon mode)")
+    parser.add_argument("--stop", action="store_true",
+                        help="Stop a running daemon server")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable debug logging")
     args = parser.parse_args()
 
+    # Get PID file path
+    pid_file = Path.home() / ".nexlog.pid"
+
+    # Handle --stop flag
+    if args.stop:
+        if not pid_file.exists():
+            print("Error: No PID file found. Server not running?")
+            return
+        try:
+            pid = int(pid_file.read_text())
+            print(f"Stopping server with PID {pid}...")
+            # Try to terminate the process
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], check=True)
+            else:
+                os.kill(pid, signal.SIGTERM)
+            # Wait a bit and clean up
+            time.sleep(1)
+            if pid_file.exists():
+                pid_file.unlink()
+            print("Server stopped.")
+        except Exception as e:
+            print(f"Error stopping server: {e}")
+        return
+
+    # Check if PID file already exists (server might be running)
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text())
+            # Check if process is still running
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True
+                )
+                if str(pid) not in result.stdout:
+                    print("Warning: PID file exists but process not found. Cleaning up...")
+                    pid_file.unlink()
+            else:
+                try:
+                    os.kill(pid, 0)  # Check if process is running
+                    print(f"Error: Server already running with PID {pid}")
+                    print(f"Use --stop to stop it or remove {pid_file}")
+                    return
+                except OSError:
+                    print("Warning: PID file exists but process not found. Cleaning up...")
+                    pid_file.unlink()
+        except Exception as e:
+            print(f"Warning: Could not check PID file: {e}")
+
+    def cleanup():
+        if pid_file.exists():
+            try:
+                pid_file.unlink()
+            except Exception:
+                pass
+
+    # Function to open browser
+    def open_browser():
+        if not args.no_browser:
+            try:
+                import webbrowser
+                url = f"http://{args.host}:{args.port}/"
+                print(f"Opening browser: {url}")
+                # Wait a bit for server to start
+                time.sleep(1)
+                webbrowser.open(url)
+            except Exception as e:
+                if args.debug:
+                    print(f"Could not open browser: {e}")
+
+    # Handle daemon mode
+    if args.daemon:
+        if sys.platform == "win32":
+            print("Daemon mode not supported on Windows.")
+            return
+        try:
+            # Daemonize process
+            pid = os.fork()
+            if pid > 0:
+                print(f"Server started in daemon mode with PID {pid}")
+                return
+            os.setsid()
+            pid = os.fork()
+            if pid > 0:
+                return
+            # Redirect file descriptors
+            devnull = os.open(os.devnull, os.O_RDWR)
+            os.dup2(devnull, 0)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+            # Write PID file
+            pid_file.write_text(str(os.getpid()))
+            atexit.register(cleanup)
+        except Exception as e:
+            print(f"Error starting daemon: {e}")
+            return
+
+    # Write PID file for non-daemon mode as well
+    if not args.daemon:
+        pid_file.write_text(str(os.getpid()))
+        atexit.register(cleanup)
+
+        # Set up signal handlers for clean shutdown
+        def signal_handler(sig, frame):
+            print("\n  Shutting down...")
+            cleanup()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
     if args.stdlib:
+        print("\n  NexLog Full Stack (stdlib mode)")
+        print(f"  API:     http://{args.host}:{args.port}/api/")
+        print(f"  UI:      http://{args.host}:{args.port}/")
+        print(f"  Auth:    {auth_status(args.key)['auth_enabled']}")
+        print(f"  Case DB: {args.case}")
+        print(f"  Static:  {_STATIC_DIR}")
+        print("  Press Ctrl+C to stop\n")
+        if not args.daemon:
+            open_browser()
         run_stdlib_fullstack(
             port         = args.port,
             host         = args.host,
@@ -585,9 +718,20 @@ def _cli_main() -> None:
             print(f"  UI:     http://{args.host}:{args.port}/")
             print(f"  Docs:   http://{args.host}:{args.port}/docs")
             print(f"  Auth:   {auth_status(args.key)['auth_enabled']}\n")
-            uvicorn.run(app, host=args.host, port=args.port)
+            if not args.daemon:
+                open_browser()
+            uvicorn.run(app, host=args.host, port=args.port, log_level="debug" if args.debug else "info")
         except ImportError:
             print("FastAPI/uvicorn not installed â€” falling back to stdlib mode.")
+            print("\n  NexLog Full Stack (stdlib mode)")
+            print(f"  API:     http://{args.host}:{args.port}/api/")
+            print(f"  UI:      http://{args.host}:{args.port}/")
+            print(f"  Auth:    {auth_status(args.key)['auth_enabled']}")
+            print(f"  Case DB: {args.case}")
+            print(f"  Static:  {_STATIC_DIR}")
+            print("  Press Ctrl+C to stop\n")
+            if not args.daemon:
+                open_browser()
             run_stdlib_fullstack(
                 port=args.port, host=args.host,
                 case_db_path=args.case,

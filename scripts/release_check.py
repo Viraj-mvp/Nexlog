@@ -159,13 +159,13 @@ def check_generated(allow_local_env: bool = False) -> list[str]:
                 failures.append(f"Generated/local artifact present: {path.relative_to(ROOT)}")
     for name in ("__pycache__", ".pytest_cache", ".ruff_cache", "workspace", "node_modules"):
         for path in ROOT.rglob(name):
-            if path.exists() and not _skip(path.parent):
+            if path.exists() and not _skip(path):
                 if _is_startup_cache(path):
                     continue
                 failures.append(f"Generated directory present: {path.relative_to(ROOT)}")
     for path in ROOT.rglob("*"):
         if path.is_dir() and any(path.name.startswith(prefix) for prefix in GENERATED_DIR_PREFIXES):
-            if not _skip(path.parent):
+            if not _skip(path):
                 failures.append(f"Generated directory present: {path.relative_to(ROOT)}")
     return sorted(set(failures))
 

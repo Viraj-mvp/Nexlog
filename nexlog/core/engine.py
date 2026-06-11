@@ -1,4 +1,4 @@
-﻿"""
+"""
 engine.py â€” NexLog Layer 1
 Single entry point for log parsing. Handles all 50+ formats.
 

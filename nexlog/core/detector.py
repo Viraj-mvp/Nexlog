@@ -1,4 +1,4 @@
-﻿"""
+"""
 detector.py â€” NexLog Layer 1
 Format detection for 50+ log formats.
 
@@ -243,7 +243,7 @@ _PROBES: list[tuple[LogFormat, re.Pattern, float]] = [
      re.compile(r'\d{4}-\d{2}-\d{2}.*(?:DEBUG|INFO|WARN|ERROR|FATAL).*org\.apache'), 1.5),
 
     (LogFormat.HEALTH_APP,
-     re.compile(r'^\d{4}-\d{2}-\d{2}.*\|\w+\|\w+\|\d+\|'), 2.0),
+     re.compile(r'^\d{4}(?:-\d{2}-|\d{2})\d{2}.*\|\w+\|\w+\|\d+\|'), 2.0),
 
     (LogFormat.SPRING_BOOT,
      re.compile(r'\d+\s+---\s+\[.*\].*\s+:\s+'), 2.0),

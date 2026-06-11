@@ -79,6 +79,20 @@ def _parse_syslog_ts(raw: str, year: Optional[int] = None) -> Optional[datetime]
     except ValueError:
         return None
 
+def _parse_apache_error_ts(raw: str) -> Optional[datetime]:
+    # Format: "Sun Dec 04 04:47:44 2005"
+    m = re.match(r'(\w{3})\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})', raw.strip())
+    if not m:
+        return None
+    _, mon_s, day, hh, mm, ss, year = m.groups()
+    mon = _MONTHS.get(mon_s.lower())
+    if not mon:
+        return None
+    try:
+        return datetime(int(year), mon, int(day), int(hh), int(mm), int(ss), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
 def _parse_iso8601(raw: str) -> Optional[datetime]:
     if not raw:
         return None
@@ -177,7 +191,7 @@ class ApacheErrorParser(BaseParser):
     _PAT = re.compile(
         r'\[(?P<time>[^\]]+)\]\s+'
         r'\[(?P<module>[^\]]*)\]\s+'
-        r'\[pid\s+(?P<pid>\d+)\]\s+'
+        r'(?:\[pid\s+(?P<pid>\d+)\]\s+)?'
         r'(?:\[client\s+(?P<client>[^\]]+)\]\s+)?'
         r'(?P<msg>.*)'
     )
@@ -190,7 +204,7 @@ class ApacheErrorParser(BaseParser):
             return e
         g = m.groupdict()
         e.timestamp_raw = g["time"]
-        e.timestamp     = _parse_iso8601(g["time"])
+        e.timestamp     = _parse_apache_error_ts(g["time"])
         e.process_id    = _safe_int(g.get("pid"))
         client = g.get("client", "") or ""
         if ":" in client:
@@ -452,6 +466,7 @@ class AuditdParser(BaseParser):
     def parse_line(self, raw_line, line_number, source_file):
         e = self._minimal(raw_line, line_number, source_file)
         # audit(1704355292.123:456): key=val key=val ...
+        kv = {}
         for m in re.finditer(r'(\w+)=(?:"([^"]*)"|([\S]+))', raw_line):
             kv[m.group(1)] = m.group(2) if m.group(2) is not None else m.group(3)
 
@@ -2319,7 +2334,8 @@ class OpenStackParser(BaseParser):
     log_format = LogFormat.OPENSTACK
 
     _PAT = re.compile(
-        r'^(?P<ts>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)'
+        r'^(?:\S+\s+)?'  # Optional filename prefix
+        r'(?P<ts>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?)'
         r'(?:\s+(?P<pid>\d+))?'
         r'\s+(?P<level>DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|AUDIT|TRACE)'
         r'\s+(?P<module>\S+)'
@@ -2510,15 +2526,15 @@ class HealthAppParser(BaseParser):
     log_format = LogFormat.HEALTH_APP
 
     _PAT = re.compile(
-        r'^(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?::\d+)?)'
+        r'^(?P<ts>\d{4}(?:-\d{2}-|\d{2})\d{2}[- ]\d{2}:\d{2}:\d{2}(?::\d+)?)'
         r'\|(?P<module>[^|]+)'
-        r'\|(?P<func>[^|]+)'
+        r'(?:\|(?P<func>[^|]+))?'
         r'\|(?P<line>\d+)'
         r'\|(?P<msg>.*)'
     )
     # Alternate: just timestamp + pipe-separated fields
     _PAT2 = re.compile(
-        r'^(?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})'
+        r'^(?P<ts>\d{4}(?:-\d{2}-|\d{2})\d{2}[- ]\d{2}:\d{2}:\d{2})'
         r'(?::\d+)?\s+(?P<msg>.*)'
     )
 
@@ -2528,14 +2544,22 @@ class HealthAppParser(BaseParser):
         m = self._PAT.match(line)
         if m:
             g = m.groupdict()
-            ts = g['ts'].replace(':', '-', 2).replace('-', ':', 2) if g['ts'].count(':') > 2 else g['ts']
             e.timestamp_raw = g['ts']
             try:
-                e.timestamp = datetime.strptime(g['ts'][:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                # Try both formats: "YYYY-MM-DD HH:MM:SS:mmm" and "YYYYMMDD-HH:MM:SS:mmm"
+                if g['ts'][4] == '-':  # Has hyphens in date part (YYYY-MM-DD)
+                    if g['ts'][10] == ' ':  # Space between date and time
+                        e.timestamp = datetime.strptime(g['ts'][:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    else:  # Hyphen between date and time
+                        e.timestamp = datetime.strptime(g['ts'][:19], '%Y-%m-%d-%H:%M:%S').replace(tzinfo=timezone.utc)
+                else:  # No hyphens in date part (YYYYMMDD)
+                    # Hyphen between date and time: "YYYYMMDD-HH:MM:SS"
+                    e.timestamp = datetime.strptime(g['ts'][:17], '%Y%m%d-%H:%M:%S').replace(tzinfo=timezone.utc)
             except ValueError:
                 pass
             e.process_name = g['module'].strip()
-            e.extra['func'] = g['func'].strip()
+            if g.get('func') is not None:
+                e.extra['func'] = g['func'].strip()
             e.extra['line'] = g['line']
             e.message = g['msg'].strip()
             e.severity = 'INFO'

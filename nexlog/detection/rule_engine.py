@@ -1,4 +1,4 @@
-﻿"""
+"""
 detection/rule_engine.py â€” NexLog Layer 2
 Loads all YAML rule files, builds the correct matcher per rule,
 and runs the full detection pipeline against a stream of LogEntry objects.
@@ -26,18 +26,24 @@ import yaml
 import re as _re
 import time
 
-_HERE = os.path.dirname(__file__)
-sys.path.insert(0, os.path.join(_HERE, '..', 'core'))
-
-from models import LogEntry
-from finding import Finding, Severity
-from pattern_matcher import (
+from ..core.models import LogEntry
+from .finding import Finding, Severity
+from .pattern_matcher import (
     RegexMatcher, ThresholdMatcher,
     SequenceMatcher, CompositeRule,
 )
-from attck_tagger import build_mitre_tags, adjust_confidence
+from .attck_tagger import build_mitre_tags, adjust_confidence
 
-_DEFAULT_RULES_DIR = os.path.join(_HERE, "rules")
+def _default_rules_dir() -> Path:
+    bundled = os.environ.get("NEXLOG_RULES_DIR")
+    if bundled:
+        return Path(bundled)
+    try:
+        from pathconfig import ROOT_PATH
+
+        return ROOT_PATH / "detection" / "rules"
+    except Exception:
+        return Path(_HERE) / "rules"
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -155,7 +161,7 @@ class RuleEngine:
         self._findings_by_cat:  dict[str, int] = {}
         self._rules_loaded      = 0
 
-        rules_path = Path(rules_dir or _DEFAULT_RULES_DIR)
+        rules_path = Path(rules_dir) if rules_dir else _default_rules_dir()
         self._load_rules(rules_path)
 
     # â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

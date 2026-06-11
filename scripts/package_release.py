@@ -157,8 +157,56 @@ def _exe_suffix() -> str:
     return ".exe" if _system() == "windows" else ""
 
 
+# ── Targeted hidden imports (no collect_all bloat) ───────────────────────
+_PYSIDE6_HIDDEN = [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "PySide6.QtQml",
+    "PySide6.QtQuick",
+    "PySide6.QtQuickControls2",
+    "PySide6.QtSvg",
+    "PySide6.QtCharts",
+    "PySide6.QtOpenGL",
+    "PySide6.QtPrintSupport",
+    "PySide6.QtNetwork",
+]
+
+_CORE_HIDDEN = [
+    "yaml",
+    "defusedxml",
+    "ijson",
+    "Evtx",
+    "reportlab",
+    "reportlab.lib",
+    "reportlab.platypus",
+    "reportlab.graphics",
+    "networkx",
+    "PIL",
+]
+
+# ── Excluded modules (keep installer payload lean) ───────────────────────
+_EXCLUDES = [
+    # Heavy ML / AI — not needed for the packaged installer
+    "torch", "torchvision", "torchaudio",
+    "tensorflow", "keras",
+    "chromadb", "sentence_transformers",
+    # Unused GUI frameworks
+    "PyQt5", "PyQt6", "PySide2",
+    "tkinter", "_tkinter", "wx",
+    # PySide6 web engine (huge, unused)
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineQuick",
+    "PySide6.QtWebEngineWidgets",
+    # Dev / test
+    "pytest", "IPython", "jupyter", "notebook",
+    "matplotlib", "scipy",
+]
+
+
 def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile: bool = True) -> list[str]:
     icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
+    rthook = ROOT / "packaging" / "pyinstaller" / "rthook_nexlog.py"
     cmd = [
         sys.executable,
         "-m",
@@ -173,59 +221,80 @@ def _pyinstaller_command(entrypoint: Path, name: str, *, windowed: bool, onefile
         "--workpath",
         str(ROOT / "build" / "pyinstaller"),
         "--specpath",
-        str(ROOT / "packaging" / "pyinstaller"),
+        str(ROOT / "build" / "pyinstaller" / "specs"),
     ]
     if onefile:
         cmd.append("--onefile")
     if icon.exists():
         cmd.extend(["--icon", str(icon)])
-    for module in [
-        "PyQt6",
-        "PyQt5",
-        "PySide2",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebEngineQuick",
-        "PySide6.QtWebEngineWidgets",
-    ]:
+
+    # Add app subdirectories to PyInstaller search path so it resolves flat imports
+    paths = [
+        str(ROOT),
+        str(ROOT / "nexlog"),
+        str(ROOT / "nexlog" / "core"),
+        str(ROOT / "nexlog" / "detection"),
+        str(ROOT / "nexlog" / "storage"),
+        str(ROOT / "nexlog" / "intelligence"),
+        str(ROOT / "nexlog" / "output"),
+        str(ROOT / "nexlog" / "utils"),
+        str(ROOT / "nexlog" / "ai"),
+        str(ROOT / "nexlog" / "interface" / "web"),
+        str(ROOT / "nexlog" / "interface" / "gui"),
+    ]
+    for p in paths:
+        cmd.extend(["--paths", p])
+
+    # Runtime hook for frozen path resolution
+    if rthook.exists():
+        cmd.extend(["--runtime-hook", str(rthook)])
+
+    # Strip on Linux (not Windows — breaks PySide6 DLLs)
+    if _system() != "windows":
+        cmd.append("--strip")
+
+    # ── Excludes ──────────────────────────────────────────────────────
+    for module in _EXCLUDES:
         cmd.extend(["--exclude-module", module])
+
+    # ── Data bundles ──────────────────────────────────────────────────
     data_items = [
-        (ROOT / "nexlog", "nexlog"),
-        (ROOT / "examples" / "logs", "examples/logs"),
-        (ROOT / ".env.example", ".env.example"),
-        (ROOT / "README.md", "README.md"),
-        (ROOT / "docs", "docs"),
-        (ROOT / "LICENSE", "LICENSE"),
+        (ROOT / "nexlog",                                  "nexlog"),
+        (ROOT / "examples" / "logs",                       "examples/logs"),
+        (ROOT / ".env.example",                            ".env.example"),
+        (ROOT / "README.md",                               "README.md"),
+        (ROOT / "docs",                                    "docs"),
+        (ROOT / "LICENSE",                                 "LICENSE"),
     ]
     for source, dest in data_items:
         if source.exists():
             cmd.extend(["--add-data", _add_data_arg(source, dest)])
-    for package in [
-        "PySide6",
-        "numpy",
-        "sklearn",
-        "maxminddb",
-        "reportlab",
-    ]:
-        cmd.extend(["--collect-all", package])
-    cmd.extend(
-        [
-            "--hidden-import",
-            "yaml",
-            "--hidden-import",
-            "defusedxml",
-            "--hidden-import",
-            "ijson",
-            "--hidden-import",
-            "Evtx",
-            str(entrypoint),
-        ]
-    )
+
+    # ── Hidden imports (targeted, not collect_all) ────────────────────
+    hidden_imports = list(_CORE_HIDDEN)
+    if windowed:
+        hidden_imports.extend(_PYSIDE6_HIDDEN)
+
+    for imp in hidden_imports:
+        cmd.extend(["--hidden-import", imp])
+
+    # ── Collect submodules for packages with dynamic imports ──────────
+    for package in ["reportlab", "maxminddb"]:
+        cmd.extend(["--collect-submodules", package])
+
+    # UPX exclusions for Windows
+    if _system() == "windows":
+        for dll in ["vcruntime140.dll", "qwindows.dll"]:
+            cmd.extend(["--upx-exclude", dll])
+
+    cmd.append(str(entrypoint))
     return cmd
 
 
 def _run_pyinstaller(entrypoint: Path, name: str, *, windowed: bool, onefile: bool) -> int:
     build_kind = "one-file" if onefile else "app-directory"
     cmd = _pyinstaller_command(entrypoint, name, windowed=windowed, onefile=onefile)
+    (ROOT / "build" / "pyinstaller" / "specs").mkdir(parents=True, exist_ok=True)
     print(f"Running PyInstaller {build_kind} build for {name}...")
     proc = subprocess.run(cmd, cwd=ROOT)
     if proc.returncode != 0:

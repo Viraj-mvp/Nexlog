@@ -24,6 +24,10 @@ from pathconfig import ROOT_PATH, WORKSPACE_DIR, add_root, load_env_profile
 load_env_profile("gui")
 
 
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
 def _workspace_writable(path: Path) -> tuple[bool, str]:
     try:
         path.mkdir(parents=True, exist_ok=True)
@@ -169,7 +173,7 @@ def main() -> int:
     if args.packaged_check or args.preflight:
         return packaged_check(case_path)
 
-    if not args._gui_child:
+    if not args._gui_child and not _is_frozen():
         base_cmd = [sys.executable, "-B", str(Path(__file__).resolve()), "--_gui-child", "--case", str(case_path)]
         if args.hardware_mode:
             base_cmd.extend(["--hardware-mode", args.hardware_mode])

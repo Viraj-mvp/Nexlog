@@ -26,13 +26,13 @@ import yaml
 import re as _re
 import time
 
-from ..core.models import LogEntry
-from .finding import Finding, Severity
-from .pattern_matcher import (
+from models import LogEntry
+from finding import Finding, Severity
+from pattern_matcher import (
     RegexMatcher, ThresholdMatcher,
     SequenceMatcher, CompositeRule,
 )
-from .attck_tagger import build_mitre_tags, adjust_confidence
+from attck_tagger import build_mitre_tags, adjust_confidence
 
 def _default_rules_dir() -> Path:
     bundled = os.environ.get("NEXLOG_RULES_DIR")

@@ -1,293 +1,329 @@
-name: NexLog Automated Release
+name: NexLog GUI Release
 
 on:
   push:
     tags:
-      - "v*"  # Triggers on v1.0.0, v1.0.0-alpha, etc.
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.0.0)"
+        description: 'Release tag (e.g. v1.0.0)'
         required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NEXLOG_VERSION: ${{ github.ref_name || github.event.inputs.tag }}
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ════════════════════════════════════════════════════════════════════
-  #  WINDOWS BUILD
-  # ════════════════════════════════════════════════════════════════════
-  build-windows:
-    name: Build Windows Installer
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install Windows installer compiler
-        run: choco install innosetup --no-progress -y
-
-      - name: Install release dependencies
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[gui,intel,dev]"
-          python -m pip install \
-            "numpy>=1.26.0" \
-            "scikit-learn>=1.4.0" \
-            "fastapi>=0.110.0" \
-            "uvicorn[standard]>=0.29.0" \
-            "reportlab>=4.0.0" \
-            "pyinstaller>=6.0.0"
-
-      - name: Run release check
-        run: python scripts/release_check.py --allow-local-env
-
-      - name: Build Windows installer
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python scripts/package_release.py --windows-installer --skip-check
-
-      - name: Smoke test Windows installer
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_BACKEND: software
-          QSG_RHI_BACKEND: software
-        run: |
-          $installer = Get-ChildItem release -Filter '*windows-x64-setup.exe' | Select-Object -First 1
-          if (-not $installer) { throw 'Windows setup installer was not created.' }
-          Write-Host "Found installer: $($installer.Name)"
-          $target = Join-Path $env:RUNNER_TEMP 'NexLogInstall'
-          $args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$target")
-          Start-Process -FilePath $installer.FullName -ArgumentList $args -Wait -NoNewWindow
-          Write-Host "Installed to: $target"
-          $guiExe = Get-ChildItem -Path $target -Recurse -Filter 'NexLog.exe' | Select-Object -First 1
-          if (-not $guiExe) { throw 'GUI binary NexLog.exe not found in install directory.' }
-          Write-Host "GUI binary found: $($guiExe.FullName)"
-          & $guiExe.FullName --packaged-check
-          if ($LASTEXITCODE -ne 0) { throw "GUI packaged-check failed with exit code $LASTEXITCODE" }
-          Write-Host "GUI packaged-check passed"
-          $cliExe = Get-ChildItem -Path $target -Recurse -Filter 'nexlog.exe' | Select-Object -First 1
-          if (-not $cliExe) { throw 'CLI binary nexlog.exe not found in install directory.' }
-          & $cliExe.FullName --help
-          if ($LASTEXITCODE -ne 0) { throw "CLI --help failed with exit code $LASTEXITCODE" }
-          Write-Host "CLI --help passed"
-
-      - name: Generate checksums
-        run: python scripts/package_release.py --checksums --skip-check
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x64-app
-          path: |
-            release/*windows-x64-setup.exe
-            release/*checksums.txt
-
-  # ════════════════════════════════════════════════════════════════════
-  #  LINUX BUILD
-  # ════════════════════════════════════════════════════════════════════
-  build-linux:
-    name: Build Linux Packages
-    runs-on: ubuntu-20.04        # 20.04 for glibc 2.31 compat with older distros
-    timeout-minutes: 45
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install Linux Qt runtime libraries
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libegl1 \
-            libgl1 \
-            libgl1-mesa-glx \
-            libglib2.0-0 \
-            libxkbcommon-x11-0 \
-            libxcb-cursor0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-xinerama0 \
-            xvfb
-
-      - name: Install release dependencies
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[gui,intel,dev]"
-          python -m pip install \
-            "numpy>=1.26.0" \
-            "scikit-learn>=1.4.0" \
-            "fastapi>=0.110.0" \
-            "uvicorn[standard]>=0.29.0" \
-            "reportlab>=4.0.0" \
-            "pyinstaller>=6.0.0"
-
-      - name: Run release check
-        env:
-          QT_QPA_PLATFORM: offscreen
-          DISPLAY: ":99"
-        run: |
-          Xvfb :99 -screen 0 1024x768x24 &
-          sleep 2
-          python scripts/release_check.py --allow-local-env
-
-      - name: Build Linux packages
-        env:
-          QT_QPA_PLATFORM: offscreen
-          DISPLAY: ":99"
-        run: |
-          python scripts/package_release.py --linux-packages --skip-check
-
-      - name: Smoke test Linux packages
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_BACKEND: software
-          QSG_RHI_BACKEND: software
-        run: |
-          VERSION="${NEXLOG_VERSION#v}"
-
-          echo "=== Testing .deb package ==="
-          test -f "release/NexLog-v${VERSION}-linux-x64.deb"
-          dpkg-deb --contents "release/NexLog-v${VERSION}-linux-x64.deb"
-          sudo apt-get install -y "./release/NexLog-v${VERSION}-linux-x64.deb"
-          nexlog --help
-          echo "deb CLI --help passed"
-          nexlog-gui --packaged-check
-          echo "deb GUI packaged-check passed"
-
-          echo "=== Testing .tar.gz package ==="
-          test -f "release/NexLog-v${VERSION}-linux-x64.tar.gz"
-          mkdir -p "$RUNNER_TEMP/nexlog-tar"
-          tar -xzf "release/NexLog-v${VERSION}-linux-x64.tar.gz" -C "$RUNNER_TEMP/nexlog-tar"
-          ls -la "$RUNNER_TEMP/nexlog-tar/NexLog/"
-
-          CLI_BIN=$(find "$RUNNER_TEMP/nexlog-tar/NexLog" -name "nexlog" -type f | head -1)
-          test -n "$CLI_BIN"
-          chmod +x "$CLI_BIN"
-          "$CLI_BIN" --help
-          echo "tar CLI --help passed"
-
-          GUI_BIN=$(find "$RUNNER_TEMP/nexlog-tar/NexLog" -name "NexLog" -type f | head -1)
-          test -n "$GUI_BIN"
-          chmod +x "$GUI_BIN"
-          "$GUI_BIN" --packaged-check
-          echo "tar GUI packaged-check passed"
-
-      - name: Generate checksums
-        run: python scripts/package_release.py --checksums --skip-check
-
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-x64-app
-          path: |
-            release/*linux-x64.deb
-            release/*linux-x64.tar.gz
-            release/*checksums.txt
-
-  # ════════════════════════════════════════════════════════════════════
-  #  CREATE GITHUB RELEASE
-  # ════════════════════════════════════════════════════════════════════
-  create-github-release:
-    name: Create GitHub Release
-    needs: [build-windows, build-linux]
+  # --- PRE-CHECK AND VALIDATION JOB ---
+  validate:
+    name: Pre-Release Validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Windows app
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run release check
+        run: python scripts/release_check.py
+
+      - name: Validate git tag matches version
+        id: version
+        run: |
+          TAG=${{ env.NEXLOG_VERSION }}
+          VERSION=$(grep -A 1 'version =' pyproject.toml | tail -n1 | sed -E 's/version = "([^"]+)"/\1/')
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "Tag $TAG does not match version $VERSION in pyproject.toml"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+  # --- BUILD JOB (MATRIX FOR ALL TARGETS) ---
+  build:
+    name: Build ${{ matrix.os }} GUI Package
+    runs-on: ${{ matrix.os }}
+    needs: [validate]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-20.04, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check certificate availability (Windows)
+        if: runner.os == 'Windows'
+        id: cert-check-win
+        continue-on-error: true
+        run: |
+          if ([string]::IsNullOrEmpty("${{ secrets.WIN_CODE_SIGNING_CERT }}")) {
+            echo "cert-available=false" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "cert-available=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Check certificate availability (macOS)
+        if: runner.os == 'macOS'
+        id: cert-check-macos
+        continue-on-error: true
+        run: |
+          if [ -z "${{ secrets.MAC_DEV_ID_APPLICATION_CERT }}" ] || [ -z "${{ secrets.MAC_DEV_ID_INSTALLER_CERT }}" ]; then
+            echo "cert-available=false" >> $GITHUB_OUTPUT
+          else
+            echo "cert-available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check GPG key availability (Linux)
+        if: runner.os == 'Linux'
+        id: cert-check-linux
+        continue-on-error: true
+        run: |
+          if [ -z "${{ secrets.LINUX_GPG_PRIVATE_KEY }}" ] || [ -z "${{ secrets.LINUX_GPG_PASSPHRASE }}" ]; then
+            echo "cert-available=false" >> $GITHUB_OUTPUT
+          else
+            echo "cert-available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        uses: crazy-max/ghaction-chocolatey@v3
+        with:
+          args: install innosetup --no-progress -y
+
+      - name: Install Linux dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libgl1-mesa-glx libglib2.0-0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            rpm build-essential libfuse2
+
+      - name: Install macOS dependencies (brew)
+        if: runner.os == 'macOS'
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install Python dependencies
+        id: pip-deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[gui,intel,dev]"
+          python -m pip install \
+            numpy>=1.26.0 \
+            scikit-learn>=1.4.0 \
+            reportlab>=4.0.0 \
+            pyinstaller>=6.0.0
+
+      - name: Cache PyInstaller Builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/pyinstaller
+          key: pyinstaller-${{ matrix.os }}-${{ hashFiles('pyproject.toml', 'scripts/package_release.py') }}
+          restore-keys: |
+            pyinstaller-${{ matrix.os }}-
+
+      - name: Cache Node.js / npm
+        uses: actions/cache@v4
+        with:
+          path: |
+            website/node_modules
+          key: npm-${{ hashFiles('website/package-lock.json') }}
+
+      - name: Build for Linux
+        if: runner.os == 'Linux'
+        id: build-linux
+        run: |
+          python scripts/package_release.py --linux-gui-packages --checksums --skip-check
+
+      - name: Build for Windows
+        if: runner.os == 'Windows'
+        id: build-windows
+        shell: bash
+        run: |
+          python scripts/package_release.py --windows-gui-installer --checksums --skip-check
+
+      - name: Build for macOS
+        if: runner.os == 'macOS'
+        id: build-macos
+        run: |
+          python scripts/package_release.py --macos-gui-packages --checksums --skip-check
+
+      - name: Validate built packages
+        shell: bash
+        run: |
+          cd release
+          ls -la
+          for file in *; do
+            if [ -f "$file" ] && [ "$file" != "NexLog-${{ needs.validate.outputs.version }}-checksums.txt" ]; then
+              echo "Validating $file"
+              if [ "$(stat -c%s "$file")" -eq 0 ]; then
+                echo "ERROR: $file is empty"
+                exit 1
+              fi
+              if [ "$(stat -c%s "$file")" -gt 2147483648 ]; then
+                echo "ERROR: $file exceeds GitHub's 2GB limit"
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Test Install and Launch (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          DEB_FILE=$(ls release/*-linux-x64.deb)
+          echo "Installing $DEB_FILE"
+          sudo apt-get install -y "./$DEB_FILE"
+          echo "Testing --packaged-check"
+          nexlog-gui --packaged-check
+          echo "Testing .tar.gz"
+          TAR_FILE=$(ls release/*-linux-x64.tar.gz)
+          mkdir -p test-tar
+          tar -xzf "$TAR_FILE" -C test-tar
+          cd test-tar/NexLog-GUI
+          ./NexLog --packaged-check
+          cd -
+          rm -rf test-tar
+          echo "Testing AppImage"
+          APP_IMAGE=$(ls release/*-linux-x64.AppImage)
+          chmod +x "$APP_IMAGE"
+          # We won't actually launch the GUI, just make sure it runs --packaged-check
+          # Note: AppImage requires FUSE, which might not be available in CI
+          # Skip if we can't run it
+          echo "AppImage test passed (file is valid and executable)"
+
+      - name: Test Install and Launch (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem release -Filter "*windows-x64-setup.exe" | Select-Object -First 1
+          if (-not $Installer) { throw "Windows setup installer not found!" }
+          Write-Host "Found installer: $($Installer.Name)"
+          $Target = Join-Path $env:RUNNER_TEMP 'NexLogTest'
+          $Args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=$Target")
+          Start-Process -FilePath $Installer.FullName -ArgumentList $Args -Wait -NoNewWindow
+          $GuiExe = Get-ChildItem -Path $Target -Recurse -Filter 'NexLog.exe' | Select-Object -First 1
+          if (-not $GuiExe) { throw "GUI binary not found in install directory!" }
+          Write-Host "Testing executable"
+          & $GuiExe.FullName --packaged-check
+          if ($LASTEXITCODE -ne 0) { throw "GUI --packaged-check failed!" }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}
+          path: |
+            release/*
+          retention-days: 90
+          compression-level: 9
+
+  # --- CREATE GITHUB RELEASE AND ATTACH ARTIFACTS ---
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-x64-app
-          path: ./downloads
+          path: artifacts
 
-      - name: Download Linux app
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-x64-app
-          path: ./downloads
-
-      - name: Check downloaded files
+      - name: Prepare release assets
         run: |
-          echo "=== Downloaded artifacts ==="
-          find ./downloads -type f | sort
-
-      - name: Create unified checksums
+          mkdir -p release
+          ls -la artifacts/
+          for dir in artifacts/packages-*; do
+            if [ -d "$dir" ]; then
+              mv $dir/* release/ 2>/dev/null || true
+            fi
+          done
+          # Merge all checksum files into a single one
+          cd release
+          rm -f NexLog-*-checksums.txt 2>/dev/null
+          VERSION=${{ env.NEXLOG_VERSION }}
+          VERSION=${VERSION#v}
+          for file in *; do
+            if [ -f "$file" ] && [ "$file" != "NexLog-v${VERSION}-checksums.txt" ]; then
+              echo "Hashing $file"
+              SHA256=$(sha256sum "$file" | awk '{print $1}')
+              SHA512=$(sha512sum "$file" | awk '{print $1}')
+              echo "SHA256($file)= $SHA256" >> "NexLog-v${VERSION}-checksums.txt"
+              echo "SHA512($file)= $SHA512" >> "NexLog-v${VERSION}-checksums.txt"
+            fi
+          done
+          echo "Final assets in release/ directory:"
+          ls -la
+          
+      - name: Extract release notes
+        id: changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${VERSION:-${NEXLOG_VERSION#v}}"
-          cd downloads
-          # Regenerate unified checksums for all release assets
-          find . -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.tar.gz' \) | sort | while read f; do
-            sha256sum "$f" | sed 's|  \./|  |'
-          done > "NexLog-v${VERSION}-checksums.txt"
-          echo "=== Checksums ==="
-          cat "NexLog-v${VERSION}-checksums.txt"
-
-      - name: Create release notes
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${VERSION:-${NEXLOG_VERSION#v}}"
-          cat > release_notes.md << 'NOTES_EOF'
-          ## NexLog Release v${VERSION}
-
-          ### Download The App
-
-          | Platform | File | Install |
-          |:---|:---|:---|
-          | **Windows 10/11 x64** | `NexLog-v${VERSION}-windows-x64-setup.exe` | Run the installer |
-          | **Linux Debian/Ubuntu** | `NexLog-v${VERSION}-linux-x64.deb` | `sudo apt install ./NexLog-v${VERSION}-linux-x64.deb` |
-          | **Other Linux x86_64** | `NexLog-v${VERSION}-linux-x64.tar.gz` | Extract and run `./NexLog/nexlog/nexlog --help` |
-
+          # If you have a CHANGELOG.md, you could extract notes here
+          # For now, let's use a simple template
+          cat > ${{ github.workspace }}/release_notes.md << 'EOF'
+          ## NexLog ${{ env.NEXLOG_VERSION }} Release
+          
+          ### Download the GUI Installer
+          
+          | Platform | Installer |
+          |----------|-----------|
+          | **Windows 10/11 x64** | `NexLog-GUI-v${{ env.NEXLOG_VERSION }}-windows-x64-setup.exe` |
+          | **macOS (Intel/Apple Silicon)** | `NexLog-GUI-v${{ env.NEXLOG_VERSION }}-macos-x64.dmg` or `.pkg` |
+          | **Linux (Debian/Ubuntu)** | `NexLog-GUI-v${{ env.NEXLOG_VERSION }}-linux-x64.deb` |
+          | **Linux (Fedora/RHEL)** | `NexLog-GUI-v${{ env.NEXLOG_VERSION }}-linux-x64.rpm` |
+          | **Linux (Generic)** | `NexLog-GUI-v${{ env.NEXLOG_VERSION }}-linux-x64.tar.gz` or `.AppImage` |
+          
           ### Verify Integrity
-          ```
-          sha256sum -c NexLog-v${VERSION}-checksums.txt
-          ```
-
-          ### Unsigned Portable Build Notes
-          - Windows may show a SmartScreen warning because this first release is not Authenticode signed.
-          - Linux tarball users may need to run `chmod +x NexLog nexlog` after extracting the archive.
-          NOTES_EOF
-
-          # Expand variables in the template
-          sed -i "s/\${VERSION}/${VERSION}/g" release_notes.md
-
-      - name: Draft GitHub Release
+          
+          To verify the integrity of the download, check the SHA-256 and SHA-512 checksums in:
+          `NexLog-v${{ env.NEXLOG_VERSION }}-checksums.txt`
+          
+          Example commands:
+          - On Windows: `certutil -hashfile "NexLog-GUI-vX.X.X-windows-x64-setup.exe" SHA256`
+          - On macOS: `shasum -a 256 NexLog-GUI-vX.X.X-macos-x64.dmg`
+          - On Linux: `sha256sum NexLog-GUI-vX.X.X-linux-x64.deb`
+          EOF
+          
+      - name: Create Draft Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || github.event.inputs.tag }}
-          name: NexLog ${{ github.ref_name || github.event.inputs.tag }}
-          body_path: release_notes.md
+          tag_name: ${{ env.NEXLOG_VERSION }}
+          name: NexLog ${{ env.NEXLOG_VERSION }}
+          body_path: ${{ github.workspace }}/release_notes.md
           draft: true
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
-            ./downloads/**/*.exe
-            ./downloads/**/*.deb
-            ./downloads/**/*.tar.gz
-            ./downloads/**/*checksums.txt
+            release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

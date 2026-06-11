@@ -112,9 +112,47 @@ def packaged_check(case_path: Path | None = None) -> int:
     return 1 if failed else 0
 
 
+def _tray_main(case_path: Path) -> None:
+    """Run the NexLog system tray interface."""
+    add_root()
+    try:
+        from PySide6.QtCore import Qt, QUrl
+        from PySide6.QtGui import QAction, QIcon, QMenu
+        from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+    except ImportError as exc:
+        print(f"ERROR: Could not import PySide6 for system tray: {exc}", file=sys.stderr)
+        print("Install GUI dependencies with: pip install PySide6", file=sys.stderr)
+        sys.exit(1)
+
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    icon = QIcon(str(ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"))
+    tray = QSystemTrayIcon(icon, app)
+    tray.setToolTip("NexLog — Local-First DFIR Log Analyzer")
+
+    menu = QMenu()
+
+    open_action = QAction("Open NexLog GUI", menu)
+    open_action.triggered.connect(lambda: subprocess.Popen([str(Path(__file__).resolve()), "--case", str(case_path)]))
+    menu.addAction(open_action)
+
+    menu.addSeparator()
+
+    quit_action = QAction("Quit", menu)
+    quit_action.triggered.connect(app.quit)
+    menu.addAction(quit_action)
+
+    tray.setContextMenu(menu)
+    tray.show()
+
+    print("NexLog system tray is running!")
+    sys.exit(app.exec())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="NexLog desktop GUI"
+        description="NexLog desktop GUI / System Tray"
     )
     parser.add_argument("--case", default="", help="Open a specific .facase database")
     parser.add_argument(
@@ -137,6 +175,11 @@ def main() -> int:
         "--preflight",
         action="store_true",
         help="Run full launch preflight, including offscreen QML and bridge smoke checks",
+    )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="Run the NexLog system tray interface",
     )
     parser.add_argument(
         "--_gui-child",
@@ -169,6 +212,10 @@ def main() -> int:
         print(f"ERROR: Could not create case directory: {case_path.parent}", file=sys.stderr)
         print(f"DETAIL: {exc}", file=sys.stderr)
         return 1
+
+    if args.tray:
+        _tray_main(case_path)
+        return 0
 
     if args.packaged_check or args.preflight:
         return packaged_check(case_path)

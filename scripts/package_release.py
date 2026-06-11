@@ -320,6 +320,7 @@ def build_app_binaries(*, onefile: bool = True) -> int:
 
     builds = [
         (ROOT / "main_gui.py", "NexLog", True),
+        (ROOT / "main.py", "nexlog", False),
     ]
     for entrypoint, name, windowed in builds:
         rc = _run_pyinstaller(entrypoint, name, windowed=windowed, onefile=onefile)
@@ -336,6 +337,41 @@ def _copy_any(src: Path, dest: Path) -> None:
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+
+
+def _stage_windows_bundle() -> Path:
+    stage = BUILD_DIR / "bundle" / "NexLog-Windows"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True, exist_ok=True)
+
+    # Add GUI binary
+    gui_src = _built_path("NexLog")
+    if not gui_src.exists():
+        raise FileNotFoundError(f"Missing built GUI binary: {gui_src}")
+    _copy_any(gui_src, stage / gui_src.name)
+
+    # Add CLI binary
+    cli_src = _built_path("nexlog")
+    if not cli_src.exists():
+        raise FileNotFoundError(f"Missing built CLI binary: {cli_src}")
+    _copy_any(cli_src, stage / cli_src.name)
+
+    for src_name in [".env.example", "README.md", "LICENSE"]:
+        src = ROOT / src_name
+        if src.exists():
+            shutil.copy2(src, stage / src_name)
+
+    examples_logs = ROOT / "examples" / "logs"
+    if examples_logs.exists():
+        shutil.copytree(examples_logs, stage / "examples" / "logs")
+
+    icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"
+    if icon.exists():
+        assets = stage / "assets"
+        assets.mkdir(exist_ok=True)
+        shutil.copy2(icon, assets / "nexlog-icon.png")
+    return stage
 
 
 def _stage_gui_bundle() -> Path:
@@ -423,12 +459,12 @@ def _inno_path() -> str | None:
 
 def build_windows_gui_installer() -> int:
     if _system() != "windows":
-        print("Windows GUI installer builds must be run on Windows.", file=sys.stderr)
+        print("Windows installer builds must be run on Windows.", file=sys.stderr)
         return 2
-    rc = _run_pyinstaller(ROOT / "main_gui.py", "NexLog", windowed=True, onefile=False)
+    rc = build_app_binaries(onefile=False)
     if rc != 0:
         return rc
-    stage = _stage_gui_bundle()
+    stage = _stage_windows_bundle()
     iscc = _inno_path()
     if not iscc:
         print("Inno Setup compiler ISCC.exe not found.", file=sys.stderr)
@@ -436,20 +472,21 @@ def build_windows_gui_installer() -> int:
 
     script_dir = BUILD_DIR / "installer"
     script_dir.mkdir(parents=True, exist_ok=True)
-    script = script_dir / "NexLog-GUI.iss"
-    output_base = f"NexLog-GUI-v{VERSION}-windows-{_machine()}-setup"
+    script = script_dir / "NexLog-Windows.iss"
+    output_base = f"NexLog-v{VERSION}-windows-{_machine()}-setup"
     icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.ico"
     license_file = ROOT / "LICENSE"
     gui_exe = str(_staged_executable(stage, "NexLog").relative_to(stage)).replace("/", "\\")
+    cli_exe = "nexlog.exe"  # since we copy it to the root of stage
     script.write_text(
         f"""
 [Setup]
 AppId={{{{7C4B926F-80B7-48E8-8EB8-FB3AF2C18A10}}}}
-AppName={APP_DISPLAY_NAME} GUI
+AppName={APP_DISPLAY_NAME}
 AppVersion={VERSION}
 AppPublisher=NexLog Contributors
-DefaultDirName={{autopf}}\\NexLog-GUI
-DefaultGroupName=NexLog-GUI
+DefaultDirName={{autopf}}\\NexLog
+DefaultGroupName=NexLog
 OutputDir={RELEASE_DIR}
 OutputBaseFilename={output_base}
 Compression=lzma2
@@ -459,16 +496,26 @@ ArchitecturesInstallIn64BitMode=x64
 DisableProgramGroupPage=yes
 SetupIconFile={icon}
 LicenseFile={license_file}
+ChangesEnvironment=yes
+CloseApplications=no
 
 [Files]
 Source: "{stage}\\*"; DestDir: "{{app}}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{{group}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"
+Name: "{{group}}\\NexLog (GUI)"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"
+Name: "{{group}}\\NexLog (System Tray)"; Filename: "{{app}}\\{gui_exe}"; Parameters: "--tray"; WorkingDir: "{{app}}"
+Name: "{{group}}\\NexLog (CLI)"; Filename: "{{app}}\\{cli_exe}"; WorkingDir: "{{app}}"
 Name: "{{autodesktop}}\\NexLog"; Filename: "{{app}}\\{gui_exe}"; WorkingDir: "{{app}}"; Tasks: desktopicon
+Name: "{{commonstartup}}\\NexLog Tray"; Filename: "{{app}}\\{gui_exe}"; Parameters: "--tray"; WorkingDir: "{{app}}"; Tasks: startuptray
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut for GUI"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "startuptray"; Description: "Run in system tray on login"; GroupDescription: "Additional options:"; Flags: unchecked
+Name: "addtopath"; Description: "Add to system PATH (for CLI usage)"; GroupDescription: "Additional options:"; Flags: unchecked
+
+[Run]
+Filename: "{{app}}\\{cli_exe}"; Parameters: "--help"; Description: "Test CLI installation"; Flags: nowait postinstall skipifsilent
 """.lstrip(),
         encoding="utf-8",
     )
@@ -503,25 +550,11 @@ def build_linux_gui_tarball() -> Path:
     return tar_path
 
 
-def build_linux_gui_tarball() -> Path:
-    import tarfile
-
-    stage = _stage_gui_bundle()
-    tar_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-linux-{_machine()}.tar.gz"
-    if tar_path.exists():
-        tar_path.unlink()
-    with tarfile.open(tar_path, "w:gz") as tf:
-        for path in stage.rglob("*"):
-            _tar_add(tf, path, Path("NexLog-GUI") / path.relative_to(stage))
-    print(f"Created Linux GUI portable tarball: {tar_path}")
-    return tar_path
-
-
 def build_linux_gui_deb() -> Path:
     if _system() != "linux":
         raise RuntimeError("Linux .deb builds must be run on Linux.")
     stage = _stage_gui_bundle()
-    package_root = BUILD_DIR / "deb" / f"nexlog-gui_{VERSION}_{_machine()}"
+    package_root = BUILD_DIR / "deb" / f"nexlog-gui_{VERSION}_{_deb_architecture()}"
     if package_root.exists():
         shutil.rmtree(package_root)
 
@@ -558,21 +591,6 @@ Keywords=log;analysis;forensics;security;
 """,
         encoding="utf-8",
     )
-    
-    # Add CLI desktop file for web UI too
-    (desktop_dir / "nexlog-web.desktop").write_text(
-        """[Desktop Entry]
-Type=Application
-Name=NexLog Web
-Comment=Local-first DFIR log analyzer - Web Interface
-Exec=nexlog
-Icon=nexlog
-Terminal=true
-Categories=01-info-gathering;Security;Utility;
-Keywords=log;analysis;forensics;security;web;
-""",
-        encoding="utf-8",
-    )
 
     debian = package_root / "DEBIAN"
     debian.mkdir(parents=True, exist_ok=True)
@@ -600,6 +618,262 @@ Description: Local-first DFIR log analyzer
     return deb_path
 
 
+def build_linux_gui_rpm() -> Path:
+    if _system() != "linux":
+        raise RuntimeError("Linux .rpm builds must be run on Linux.")
+    stage = _stage_gui_bundle()
+    rpmbuild_root = BUILD_DIR / "rpmbuild"
+    if rpmbuild_root.exists():
+        shutil.rmtree(rpmbuild_root)
+    for dir_name in ["BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"]:
+        (rpmbuild_root / dir_name).mkdir(parents=True, exist_ok=True)
+    
+    # Prepare tarball for rpmbuild
+    source_tar = rpmbuild_root / "SOURCES" / f"nexlog-gui-{VERSION}.tar.gz"
+    with __import__("tarfile").open(source_tar, "w:gz") as tf:
+        for path in stage.rglob("*"):
+            _tar_add(tf, path, Path(f"nexlog-gui-{VERSION}") / path.relative_to(stage))
+    
+    # Write spec file
+    spec_path = rpmbuild_root / "SPECS" / "nexlog-gui.spec"
+    icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"
+    spec_path.write_text(
+        f"""Name: nexlog-gui
+Version: {VERSION}
+Release: 1%{{?dist}}
+Summary: Local-first DFIR log analyzer
+License: MIT
+URL: https://github.com/nexlog/nexlog
+Source0: nexlog-gui-{VERSION}.tar.gz
+BuildArch: {_deb_architecture()}
+Requires: {LINUX_DEPENDS.replace("libc6", "glibc")}
+
+%description
+NexLog is a desktop GUI tool for analyzing security logs.
+
+%prep
+%setup -q -n nexlog-gui-{VERSION}
+
+%install
+mkdir -p %{{buildroot}}/opt/nexlog-gui
+cp -a * %{{buildroot}}/opt/nexlog-gui/
+chmod +x %{{buildroot}}/opt/nexlog-gui/NexLog
+
+mkdir -p %{{buildroot}}/usr/bin
+cat > %{{buildroot}}/usr/bin/nexlog-gui << 'EOF'
+#!/bin/sh
+exec /opt/nexlog-gui/NexLog "$@"
+EOF
+chmod +x %{{buildroot}}/usr/bin/nexlog-gui
+
+mkdir -p %{{buildroot}}/usr/share/icons/hicolor/256x256/apps
+cp {icon} %{{buildroot}}/usr/share/icons/hicolor/256x256/apps/nexlog.png
+
+mkdir -p %{{buildroot}}/usr/share/applications
+cat > %{{buildroot}}/usr/share/applications/nexlog-gui.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=NexLog
+Comment=Local-first DFIR log analyzer
+Exec=nexlog-gui
+Icon=nexlog
+Terminal=false
+Categories=01-info-gathering;Security;Utility;
+Keywords=log;analysis;forensics;security;
+EOF
+
+%files
+/opt/nexlog-gui
+/usr/bin/nexlog-gui
+/usr/share/icons/hicolor/256x256/apps/nexlog.png
+/usr/share/applications/nexlog-gui.desktop
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run([
+        "rpmbuild", 
+        "-bb", 
+        "--define", f"_topdir {rpmbuild_root}", 
+        str(spec_path)
+    ], cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("RPM build error:", proc.stderr)
+        raise RuntimeError("rpmbuild failed")
+    
+    rpm_file = list((rpmbuild_root / "RPMS" / _deb_architecture()).glob("*.rpm"))[0]
+    target_rpm_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-linux-{_machine()}.rpm"
+    shutil.copy2(rpm_file, target_rpm_path)
+    print(f"Created Linux GUI rpm package: {target_rpm_path}")
+    return target_rpm_path
+
+
+def build_linux_gui_appimage() -> Path:
+    if _system() != "linux":
+        raise RuntimeError("Linux AppImage builds must be run on Linux.")
+    stage = _stage_gui_bundle()
+    appdir = BUILD_DIR / "NexLog-GUI.AppDir"
+    if appdir.exists():
+        shutil.rmtree(appdir)
+    appdir.mkdir(parents=True, exist_ok=True)
+
+    # Copy app to AppDir
+    shutil.copytree(stage, appdir / "usr" / "bin" / "nexlog-gui")
+    (appdir / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+    binary_path = _staged_executable(stage, "NexLog")
+    shutil.copy2(binary_path, appdir / "usr" / "bin" / "NexLog")
+    (appdir / "usr" / "bin" / "NexLog").chmod(0o755)
+
+    # Create AppRun
+    apprun_path = appdir / "AppRun"
+    apprun_path.write_text(
+        """#!/bin/sh
+cd "$(dirname "$0")"
+exec ./usr/bin/NexLog "$@"
+""",
+        encoding="utf-8",
+    )
+    apprun_path.chmod(0o755)
+
+    # Create .desktop file
+    icon_path = appdir / "nexlog.png"
+    original_icon = ROOT / "nexlog" / "interface" / "gui" / "assets" / "nexlog-icon.png"
+    if original_icon.exists():
+        shutil.copy2(original_icon, icon_path)
+
+    desktop_path = appdir / "nexlog-gui.desktop"
+    desktop_path.write_text(
+        """[Desktop Entry]
+Type=Application
+Name=NexLog
+Comment=Local-first DFIR log analyzer
+Exec=NexLog
+Icon=nexlog
+Terminal=false
+Categories=01-info-gathering;Security;Utility;
+Keywords=log;analysis;forensics;security;
+""",
+        encoding="utf-8",
+    )
+
+    # Get appimagetool
+    appimagetool_url = "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+    if _machine() == "arm64":
+        appimagetool_url = "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage"
+    appimagetool_path = BUILD_DIR / "appimagetool"
+    if not appimagetool_path.exists():
+        print(f"Downloading appimagetool from {appimagetool_url}...")
+        import urllib.request
+        urllib.request.urlretrieve(appimagetool_url, appimagetool_path)
+        appimagetool_path.chmod(0o755)
+
+    # Build AppImage
+    appimage_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-linux-{_machine()}.AppImage"
+    proc = subprocess.run([str(appimagetool_path), str(appdir), str(appimage_path)], cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("AppImage build error:", proc.stderr)
+        raise RuntimeError("appimagetool failed")
+    
+    appimage_path.chmod(0o755)
+    print(f"Created Linux GUI AppImage: {appimage_path}")
+    return appimage_path
+
+
+def build_macos_gui_app() -> Path:
+    if _system() != "darwin":
+        raise RuntimeError("macOS app builds must be run on macOS.")
+    rc = _run_pyinstaller(ROOT / "main_gui.py", "NexLog", windowed=True, onefile=False)
+    if rc != 0:
+        return rc
+    app_path = RELEASE_DIR / "NexLog.app"
+    if not app_path.exists():
+        raise FileNotFoundError(f"Built macOS app not found at {app_path}")
+    return app_path
+
+
+def build_macos_gui_dmg() -> Path:
+    if _system() != "darwin":
+        raise RuntimeError("macOS DMG builds must be run on macOS.")
+    app_path = build_macos_gui_app()
+    dmg_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-macos-{_machine()}.dmg"
+    if dmg_path.exists():
+        dmg_path.unlink()
+
+    # Use create-dmg (brew install create-dmg) or hdiutil
+    script_dir = BUILD_DIR / "dmg"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    volume_name = f"NexLog v{VERSION}"
+    
+    # First try create-dmg
+    create_dmg = shutil.which("create-dmg")
+    if create_dmg:
+        cmd = [
+            create_dmg,
+            "--volname", volume_name,
+            "--window-pos", "200", "120",
+            "--window-size", "800", "400",
+            "--icon-size", "80",
+            "--icon", "NexLog.app", "200", "180",
+            "--hide-extension", "NexLog.app",
+            "--app-drop-link", "500", "180",
+            str(dmg_path),
+            str(app_path),
+        ]
+        proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+        if proc.returncode == 0:
+            print(f"Created macOS DMG: {dmg_path}")
+            return dmg_path
+        else:
+            print("create-dmg failed, trying hdiutil...")
+
+    # Fallback to hdiutil
+    dmg_temp = BUILD_DIR / "temp.dmg"
+    if dmg_temp.exists():
+        dmg_temp.unlink()
+    proc = subprocess.run([
+        "hdiutil", "create",
+        "-volname", volume_name,
+        "-srcfolder", str(app_path.parent),
+        "-ov",
+        "-format", "UDZO",
+        str(dmg_temp),
+    ], cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("hdiutil error:", proc.stderr)
+        raise RuntimeError("hdiutil failed")
+    shutil.move(dmg_temp, dmg_path)
+    print(f"Created macOS DMG: {dmg_path}")
+    return dmg_path
+
+
+def build_macos_gui_pkg() -> Path:
+    if _system() != "darwin":
+        raise RuntimeError("macOS PKG builds must be run on macOS.")
+    app_path = build_macos_gui_app()
+    pkg_path = RELEASE_DIR / f"NexLog-GUI-v{VERSION}-macos-{_machine()}.pkg"
+    if pkg_path.exists():
+        pkg_path.unlink()
+    
+    pkg_root = BUILD_DIR / "pkgroot"
+    if pkg_root.exists():
+        shutil.rmtree(pkg_root)
+    (pkg_root / "Applications").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(app_path, pkg_root / "Applications" / "NexLog.app")
+
+    proc = subprocess.run([
+        "pkgbuild",
+        "--root", str(pkg_root),
+        "--identifier", "io.nexlog.gui",
+        "--version", VERSION,
+        "--install-location", "/",
+        str(pkg_path),
+    ], cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        print("pkgbuild error:", proc.stderr)
+        raise RuntimeError("pkgbuild failed")
+    print(f"Created macOS PKG: {pkg_path}")
+    return pkg_path
+
+
 def build_linux_gui_packages() -> int:
     if _system() != "linux":
         print("Linux GUI packages must be built on Linux.", file=sys.stderr)
@@ -609,6 +883,17 @@ def build_linux_gui_packages() -> int:
         return rc
     build_linux_gui_tarball()
     build_linux_gui_deb()
+    build_linux_gui_rpm()
+    build_linux_gui_appimage()
+    return 0
+
+
+def build_macos_gui_packages() -> int:
+    if _system() != "darwin":
+        print("macOS GUI packages must be built on macOS.", file=sys.stderr)
+        return 2
+    build_macos_gui_dmg()
+    build_macos_gui_pkg()
     return 0
 
 
@@ -623,8 +908,10 @@ def write_checksums() -> Path:
     )
     with checksum_path.open("w", encoding="utf-8", newline="\n") as fh:
         for path in candidates:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            fh.write(f"{digest}  {path.name}\n")
+            sha256_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            sha512_hash = hashlib.sha512(path.read_bytes()).hexdigest()
+            fh.write(f"SHA256({path.name})= {sha256_hash}\n")
+            fh.write(f"SHA512({path.name})= {sha512_hash}\n")
     print(f"Created checksums: {checksum_path}")
     return checksum_path
 
@@ -638,16 +925,17 @@ def main() -> int:
     parser.add_argument("--source-zip", action="store_true", help="Create clean source ZIP.")
     parser.add_argument("--gui", action="store_true", help="Build GUI-only binary package for this OS.")
     parser.add_argument("--windows-gui-installer", action="store_true", help="Build Windows GUI setup installer; requires Windows and Inno Setup.")
-    parser.add_argument("--linux-gui-packages", action="store_true", help="Build Linux GUI .deb and portable .tar.gz packages.")
-    parser.add_argument("--checksums", action="store_true", help="Write SHA-256 checksums for release assets.")
+    parser.add_argument("--linux-gui-packages", action="store_true", help="Build Linux GUI packages (.deb, .rpm, .AppImage, .tar.gz).")
+    parser.add_argument("--macos-gui-packages", action="store_true", help="Build macOS GUI packages (.dmg, .pkg).")
+    parser.add_argument("--checksums", action="store_true", help="Write SHA-256 and SHA-512 checksums for release assets.")
     parser.add_argument("--all", action="store_true", help="Run checks, build source ZIP, and build GUI package.")
     parser.add_argument("--skip-check", action="store_true", help="Do not run release_check before building.")
     args = parser.parse_args()
 
-    if not any((args.source_zip, args.gui, args.windows_gui_installer, args.linux_gui_packages, args.checksums, args.all)):
+    if not any((args.source_zip, args.gui, args.windows_gui_installer, args.linux_gui_packages, args.macos_gui_packages, args.checksums, args.all)):
         parser.print_help()
         return 0
-    if not args.skip_check and (args.all or args.gui or args.windows_gui_installer or args.linux_gui_packages):
+    if not args.skip_check and (args.all or args.gui or args.windows_gui_installer or args.linux_gui_packages or args.macos_gui_packages):
         rc = run_release_check()
         if rc != 0:
             return rc
@@ -659,6 +947,10 @@ def main() -> int:
             return rc
     if args.linux_gui_packages:
         rc = build_linux_gui_packages()
+        if rc != 0:
+            return rc
+    if args.macos_gui_packages:
+        rc = build_macos_gui_packages()
         if rc != 0:
             return rc
     if args.gui or args.all:

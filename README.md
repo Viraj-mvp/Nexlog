@@ -46,7 +46,12 @@ Export IOCs. Query findings with AI. All data stays on your machine.
 
 ## 🚀 Quick Start
 
-### Install from source
+### Option 1: Install from Release (Windows/Linux)
+Download the latest package from the [Releases page](https://github.com/nexlog/nexlog/releases):
+- **Windows**: Use the `.exe` installer
+- **Linux**: Choose `.deb`, `.rpm`, `.AppImage`, or `.tar.gz`
+
+### Option 2: Install from Source
 
 ```bash
 # Clone the repository
@@ -59,14 +64,7 @@ source .venv/bin/activate        # Linux / macOS
 # .\.venv\Scripts\Activate.ps1   # Windows PowerShell
 
 # Install NexLog
-pip install .                    # Core CLI only (lightweight)
 pip install ".[all]"             # Everything: CLI + GUI + Web + AI + Intel
-```
-
-### Or install dependencies directly
-
-```bash
-pip install -r requirements.txt
 ```
 
 ### Run your first analysis
@@ -354,33 +352,48 @@ python scripts/clean_project.py --apply --include-sensitive
 
 ---
 
-## 📦 Packaging
+## 📦 Packaging & Installation
 
-For detailed instructions on compiling the Windows standalone `.exe`, zipping source archives, and setting up automated GitHub release pipelines, see the [NexLog Release & Packaging Guide](docs/RELEASE_GUIDE.md).
+For detailed instructions, see the [NexLog Release & Packaging Guide](docs/RELEASE_GUIDE.md).
 
-### pip install (recommended)
+### Windows (Recommended)
+Use the **Windows Installer** (`.exe`) from the [Releases page](https://github.com/nexlog/nexlog/releases)!
+- Auto-launches after installation
+- Includes all dependencies
 
-```bash
-pip install .                  # Core CLI only
-pip install ".[web]"           # + FastAPI web cockpit
-pip install ".[gui]"           # + PySide6 desktop GUI
-pip install ".[ai]"            # + AI/ML models (sentence-transformers, chromadb)
-pip install ".[intel]"         # + Threat intelligence (MaxMind GeoIP)
-pip install ".[all]"           # Everything
-pip install ".[dev]"           # + Development tools (pytest, pyinstaller)
-```
+### Linux
+Choose your package format:
+- **Debian/Ubuntu/Kali/Parrot**: `.deb` package
+- **Fedora/RHEL/Rocky**: `.rpm` package
+- **Generic Linux**: `.AppImage` or `.tar.gz`
 
-### Standalone binary (PyInstaller)
-
-```bash
-python scripts/package_release.py --binary
-```
-
-### Source ZIP
+### From Source (All Platforms)
 
 ```bash
-python scripts/package_release.py --source-zip --skip-check
+# Clone the repository
+git clone https://github.com/nexlog/nexlog.git
+cd nexlog
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Linux / macOS
+# .\.venv\Scripts\Activate.ps1   # Windows PowerShell
+
+# Install NexLog
+pip install .                    # Core CLI only (lightweight)
+pip install ".[web]"             # + FastAPI web cockpit
+pip install ".[gui]"             # + PySide6 desktop GUI
+pip install ".[ai]"              # + AI/ML models (sentence-transformers, chromadb)
+pip install ".[intel]"           # + Threat intelligence (MaxMind GeoIP)
+pip install ".[all]"             # Everything
+pip install ".[dev]"             # + Development tools (pytest, pyinstaller)
 ```
+
+### Requirements
+- Python 3.10 or later
+- For GUI: PySide6 (installed automatically with `.[gui]`)
+- For AI: numpy, scikit-learn, sentence-transformers, chromadb (installed with `.[ai]`)
+
 
 
 ---
